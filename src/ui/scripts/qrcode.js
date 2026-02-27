@@ -157,17 +157,17 @@ export function getQRCodeCode() {
             '</div>';
         };
 
-      } catch (error) {
-        console.error('二维码生成过程发生错误:', error);
-        container.innerHTML =
-          '<div style="width: 200px; height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f8f9fa; border: 2px dashed #dee2e6; border-radius: 8px; text-align: center; font-size: 12px; color: #6c757d; line-height: 1.4;">' +
-          '<div style="font-size: 24px; margin-bottom: 10px;">⚠️</div>' +
-          '<div style="margin-bottom: 8px; font-weight: bold;">生成失败</div>' +
-          '<div style="margin-bottom: 8px;">发生未知错误</div>' +
-          '<div>' + error.message + '</div>' +
-          '</div>';
-      }
-    }
+	      } catch (error) {
+	        console.error('二维码生成过程发生错误:', error);
+	        container.innerHTML =
+	          '<div style="width: 200px; height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f8f9fa; border: 2px dashed #dee2e6; border-radius: 8px; text-align: center; font-size: 12px; color: #6c757d; line-height: 1.4;">' +
+	          '<div style="font-size: 24px; margin-bottom: 10px;">⚠️</div>' +
+	          '<div style="margin-bottom: 8px; font-weight: bold;">生成失败</div>' +
+	          '<div style="margin-bottom: 8px;">发生未知错误</div>' +
+	          '<div>' + escapeHTML(error.message || '未知错误') + '</div>' +
+	          '</div>';
+	      }
+	    }
 
     // 显示二维码扫描器
     function showQRScanner() {

@@ -10,6 +10,7 @@ import {
 	handleUpdateSecret,
 	handleDeleteSecret,
 	handleGenerateOTP,
+	handleGenerateOTPFromBody,
 	handleBatchAddSecrets,
 	handleBatchDeleteSecrets,
 	handleGetSecretsStats,
@@ -137,7 +138,6 @@ export async function handleRequest(request, env) {
 					headers: {
 						'Content-Type': 'application/javascript; charset=utf-8',
 						'Cache-Control': 'public, max-age=3600', // 缓存1小时
-						'Access-Control-Allow-Origin': '*',
 					},
 				});
 			} catch (error) {
@@ -184,6 +184,16 @@ export async function handleRequest(request, env) {
 
 		// 处理 /otp/{secret}（生成OTP）
 		if (pathname.startsWith('/otp/')) {
+			const allowLegacyOtpPath = String(env.ALLOW_LEGACY_OTP_PATH || 'false').toLowerCase() === 'true';
+			if (!allowLegacyOtpPath) {
+				return createErrorResponse(
+					'路径已禁用',
+					'为保护密钥安全，/otp/{secret} 已默认禁用。请改用 POST /api/otp/generate，并在请求体中传递 secret。',
+					410,
+					request,
+				);
+			}
+
 			const secret = pathname.substring(5); // 去掉 '/otp/'
 			return await handleGenerateOTP(secret, request);
 		}
@@ -214,10 +224,18 @@ export async function handleRequest(request, env) {
  */
 async function handleApiRequest(pathname, method, request, env) {
 	// 密钥管理API
+	if (pathname === '/api/otp/generate') {
+		if (method === 'POST') {
+			return handleGenerateOTPFromBody(request);
+		}
+		return createErrorResponse('方法不允许', `不支持的HTTP方法: ${method}`, 405, request);
+	}
+
+	// 密钥管理API
 	if (pathname === '/api/secrets') {
 		switch (method) {
 			case 'GET':
-				return handleGetSecrets(env);
+				return handleGetSecrets(request, env);
 			case 'POST':
 				return handleAddSecret(request, env);
 			default:

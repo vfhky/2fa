@@ -616,7 +616,8 @@ describe('API Secrets Module', () => {
 
       expect(response.status).toBe(400);
       const text = await response.text();
-      expect(text).toContain('Usage:');
+      expect(text).toContain('安全模式（推荐）');
+      expect(text).toContain('/api/otp/generate');
     });
   });
 

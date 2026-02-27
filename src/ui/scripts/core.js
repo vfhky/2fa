@@ -93,11 +93,18 @@ export function getCoreCode() {
     }
 
     // 页面加载时获取密钥列表
-    document.addEventListener('DOMContentLoaded', function() {
-        // 先检查认证状态
-        if (checkAuth()) {
-          loadSecrets();
-          // Cookie 过期由浏览器自动管理，无需定时检查
+	    document.addEventListener('DOMContentLoaded', function() {
+	        // 安全加固：移除历史版本遗留的明文密钥缓存
+	        try {
+	          localStorage.removeItem('2fa-secrets-cache');
+	        } catch (e) {
+	          console.warn('清理历史密钥缓存失败:', e);
+	        }
+
+	        // 先检查认证状态
+	        if (checkAuth()) {
+	          loadSecrets();
+	          // Cookie 过期由浏览器自动管理，无需定时检查
         }
         initTheme();
         
@@ -115,11 +122,10 @@ export function getCoreCode() {
         }, 500);
       });
 
-    // 加载密钥列表
-    async function loadSecrets() {
-      const CACHE_KEY = '2fa-secrets-cache';
-      try {
-        const response = await authenticatedFetch('/api/secrets');
+	    // 加载密钥列表
+	    async function loadSecrets() {
+	      try {
+	        const response = await authenticatedFetch('/api/secrets');
 
         if (response.status === 401) {
           handleUnauthorized();
@@ -144,46 +150,16 @@ export function getCoreCode() {
           throw new Error('加载失败: ' + errorMessage);
         }
 
-        secrets = await response.json();
-        statsCache = null; // 数据变更后清空统计缓存
+	        secrets = await response.json();
+	        statsCache = null; // 数据变更后清空统计缓存
 
-        // 成功获取数据后，保存到 localStorage 作为缓存
-        try {
-          localStorage.setItem(CACHE_KEY, JSON.stringify({
-            data: secrets,
-            timestamp: Date.now()
-          }));
-        } catch (e) {
-          console.warn('缓存数据失败:', e);
-        }
+	        await renderSecrets();
+	      } catch (error) {
+	        console.error('加载密钥失败:', error);
+	        showCenterToast('⚠️', (error && error.message) ? error.message : '加载失败，请检查网络后重试');
 
-        await renderSecrets();
-      } catch (error) {
-        console.error('加载密钥失败:', error);
-
-        // 尝试从缓存中读取数据
-        try {
-          const cached = localStorage.getItem(CACHE_KEY);
-          if (cached) {
-            const { data, timestamp } = JSON.parse(cached);
-            secrets = data;
-
-            // 显示缓存数据
-            await renderSecrets();
-
-            // 提示用户正在使用缓存数据
-            const cacheTime = new Date(timestamp).toLocaleString('zh-CN');
-            showCenterToast('💾', '网络异常，显示缓存数据（' + cacheTime + '）');
-
-            console.log('使用缓存数据，缓存时间:', cacheTime);
-            return;
-          }
-        } catch (e) {
-          console.warn('读取缓存失败:', e);
-        }
-
-        // 既没有网络数据也没有缓存数据，显示空状态
-        document.getElementById('loading').style.display = 'none';
+	        // 网络失败时显示空状态
+	        document.getElementById('loading').style.display = 'none';
         document.getElementById('emptyState').style.display = 'block';
       }
     }

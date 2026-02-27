@@ -86,7 +86,6 @@ export function createManifest(request) {
 		headers: {
 			'Content-Type': 'application/manifest+json',
 			'Cache-Control': 'public, max-age=3600',
-			'Access-Control-Allow-Origin': '*',
 		},
 	});
 }
@@ -146,7 +145,6 @@ export function createDefaultIcon(size = 192) {
 		headers: {
 			'Content-Type': 'image/svg+xml',
 			'Cache-Control': 'public, max-age=86400',
-			'Access-Control-Allow-Origin': '*',
 		},
 	});
 }

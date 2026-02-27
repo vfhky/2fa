@@ -18,7 +18,8 @@ import {
 vi.mock('../../src/utils/encryption.js', () => ({
   encryptData: vi.fn(async (data, env) => {
     return JSON.stringify({ encrypted: true, data });
-  })
+  }),
+  ensureEncryptionConfigured: vi.fn(() => {})
 }));
 
 // Mock logger

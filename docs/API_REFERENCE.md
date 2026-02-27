@@ -32,11 +32,12 @@ Cookie: auth_token=<JWT_TOKEN>
 - `GET /sw.js` - Service Worker
 - `GET /icon-*.png` - PWA 图标
 - `POST /api/login` - 登录
-- `GET /otp/{secret}` - OTP 生成（传统方式）
+- `POST /api/otp/generate` - OTP 生成（安全方式）
+- `GET /otp/{secret}` - OTP 生成（传统方式，默认禁用）
 
 **受保护端点**（需要认证）:
 
-- 所有 `/api/*` 端点（除了 `/api/login`）
+- 所有 `/api/*` 端点（除了 `/api/login`、`/api/otp/generate`）
 
 ### 获取认证 Token
 
@@ -114,8 +115,10 @@ Set-Cookie: auth_token=<NEW_JWT_TOKEN>; HttpOnly; Secure; SameSite=Strict; Max-A
 | [/api/secrets](#添加新密钥)            | POST   | ✅   | 60/min  | 添加新密钥       |
 | [/api/secrets/{id}](#更新密钥)         | PUT    | ✅   | 60/min  | 更新指定密钥     |
 | [/api/secrets/{id}](#删除密钥)         | DELETE | ✅   | 60/min  | 删除指定密钥     |
-| [/api/secrets/batch](#批量添加密钥)    | POST   | ✅   | 10/min  | 批量添加密钥     |
-| [/api/generate-otp](#生成-otp)         | POST   | ✅   | 100/min | 生成 OTP         |
+| [/api/secrets/batch](#批量添加密钥)    | POST   | ✅   | 20/5min | 批量添加密钥     |
+| [/api/secrets/batch](#批量删除密钥)    | DELETE | ✅   | 20/5min | 批量删除密钥     |
+| [/api/secrets/stats](#获取统计数据)    | GET    | ✅   | 30/min  | 获取密钥统计数据 |
+| [/api/otp/generate](#生成-otp)         | POST   | ❌   | 100/min | 生成 OTP（安全） |
 | [/api/backup](#手动触发备份)           | POST   | ✅   | 5/min   | 手动触发备份     |
 | [/api/backups](#获取备份列表)          | GET    | ✅   | 30/min  | 获取备份列表     |
 | [/api/backups/export/{id}](#导出备份)  | GET    | ✅   | 10/min  | 导出指定备份     |
@@ -419,6 +422,152 @@ Cookie: auth_token=<JWT_TOKEN>
 
 ---
 
+### 批量删除密钥
+
+**端点**: `DELETE /api/secrets/batch`
+
+**认证**: ✅ 需要
+
+**描述**: 批量删除多个密钥（支持部分成功）
+
+**请求体**:
+
+```json
+{
+	"ids": ["550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440001"]
+}
+```
+
+**成功响应** (200 OK):
+
+```json
+{
+	"success": true,
+	"message": "批量删除完成: 成功 2 个, 失败 0 个",
+	"successCount": 2,
+	"failCount": 0,
+	"totalCount": 2,
+	"deletedIds": ["550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440001"],
+	"results": [
+		{
+			"index": 0,
+			"id": "550e8400-e29b-41d4-a716-446655440000",
+			"success": true,
+			"name": "GitHub",
+			"account": "user@example.com"
+		},
+		{
+			"index": 1,
+			"id": "660e8400-e29b-41d4-a716-446655440001",
+			"success": true,
+			"name": "Google",
+			"account": "john@gmail.com"
+		}
+	]
+}
+```
+
+**部分成功响应** (200 OK):
+
+```json
+{
+	"success": true,
+	"message": "批量删除完成: 成功 1 个, 失败 2 个",
+	"successCount": 1,
+	"failCount": 2,
+	"totalCount": 3,
+	"deletedIds": ["550e8400-e29b-41d4-a716-446655440000"],
+	"results": [
+		{
+			"index": 0,
+			"id": "550e8400-e29b-41d4-a716-446655440000",
+			"success": true,
+			"name": "GitHub",
+			"account": "user@example.com"
+		},
+		{
+			"index": 1,
+			"id": "not-exist-id",
+			"success": false,
+			"error": "密钥不存在"
+		},
+		{
+			"index": 2,
+			"id": "550e8400-e29b-41d4-a716-446655440000",
+			"success": false,
+			"error": "重复的密钥 ID"
+		}
+	]
+}
+```
+
+---
+
+### 获取统计数据
+
+**端点**: `GET /api/secrets/stats`
+
+**认证**: ✅ 需要
+
+**描述**: 获取当前密钥的统计摘要（总数、类型分布、算法分布、密钥强度、服务分布等）
+
+**成功响应** (200 OK):
+
+```json
+{
+	"success": true,
+	"message": "统计数据获取成功",
+	"data": {
+		"overview": {
+			"totalSecrets": 128,
+			"uniqueServices": 86,
+			"withAccount": 120,
+			"withoutAccount": 8
+		},
+		"typeDistribution": {
+			"TOTP": 124,
+			"HOTP": 4,
+			"UNKNOWN": 0
+		},
+		"algorithmDistribution": {
+			"SHA1": 110,
+			"SHA256": 16,
+			"SHA512": 2,
+			"UNKNOWN": 0
+		},
+		"digitsDistribution": {
+			"6": 120,
+			"8": 8,
+			"other": 0
+		},
+		"periodDistribution": {
+			"30": 118,
+			"60": 6,
+			"120": 0,
+			"other": 0
+		},
+		"security": {
+			"strongSecrets": 90,
+			"weakSecrets": 38,
+			"invalidSecrets": 0
+		},
+		"topServices": [
+			{
+				"name": "GitHub",
+				"count": 4
+			},
+			{
+				"name": "Google",
+				"count": 3
+			}
+		]
+	},
+	"generatedAt": "2026-02-24T10:30:00.000Z"
+}
+```
+
+---
+
 ### 导入格式参考
 
 批量导入功能在客户端自动识别格式并解析为标准结构后调用 `POST /api/secrets/batch`。以下是各应用导出文件的格式说明。
@@ -584,23 +733,22 @@ GitHub,user@example.com,JBSWY3DPEHPK3PXP,TOTP,6,30,SHA1
 
 ### 生成 OTP
 
-**端点**: `POST /api/generate-otp`
+**端点**: `POST /api/otp/generate`
 
-**认证**: ✅ 需要
+**认证**: ❌ 不需要
 
-**描述**: 根据密钥生成一次性密码（OTP）
+**描述**: 根据密钥生成一次性密码（OTP），密钥通过请求体传输，避免 URL 泄漏
 
 **请求体**:
 
 ```json
 {
 	"secret": "JBSWY3DPEHPK3PXP",
-	"type": "totp",
-	"options": {
-		"timeStep": 30,
-		"digits": 6,
-		"algorithm": "SHA1"
-	}
+	"type": "TOTP",
+	"digits": 6,
+	"period": 30,
+	"algorithm": "SHA1",
+	"counter": 0
 }
 ```
 
@@ -608,32 +756,24 @@ GitHub,user@example.com,JBSWY3DPEHPK3PXP,TOTP,6,30,SHA1
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `secret` | String | ✅ | - | Base32 编码的密钥 |
-| `type` | String | ❌ | `"totp"` | OTP 类型: `totp`, `hotp` |
-| `options.timeStep` | Number | ❌ | `30` | TOTP 时间步长（秒） |
-| `options.digits` | Number | ❌ | `6` | OTP 位数（6 或 8） |
-| `options.algorithm` | String | ❌ | `"SHA1"` | 哈希算法: `SHA1`, `SHA256`, `SHA512` |
-| `options.counter` | Number | ❌ | - | HOTP 计数器（仅 HOTP 需要） |
+| `type` | String | ❌ | `"TOTP"` | OTP 类型: `TOTP`, `HOTP` |
+| `digits` | Number | ❌ | `6` | OTP 位数（6 或 8） |
+| `period` | Number | ❌ | `30` | TOTP 时间步长（秒） |
+| `algorithm` | String | ❌ | `"SHA1"` | 哈希算法: `SHA1`, `SHA256`, `SHA512` |
+| `counter` | Number | ❌ | `0` | HOTP 计数器（仅 HOTP 需要） |
 
 **成功响应** (200 OK):
 
 ```json
 {
-	"otp": "123456",
-	"timeRemaining": 25,
-	"timestamp": "2025-10-24T10:30:00.000Z",
-	"type": "totp",
-	"nextOtp": "654321"
+	"token": "123456"
 }
 ```
 
 **响应字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `otp` | String | 当前 OTP（6 位数字） |
-| `timeRemaining` | Number | 当前 OTP 剩余有效时间（秒） |
-| `timestamp` | String | 服务器时间戳 |
-| `type` | String | OTP 类型 |
-| `nextOtp` | String | 下一个时段的 OTP（仅 TOTP） |
+| `token` | String | 当前 OTP（6/8 位数字） |
 
 **错误响应**:
 
@@ -655,7 +795,7 @@ GitHub,user@example.com,JBSWY3DPEHPK3PXP,TOTP,6,30,SHA1
 
 **认证**: ❌ 不需要
 
-**描述**: 简化的 OTP 生成端点（向后兼容旧版本）
+**描述**: 简化的 OTP 生成端点（向后兼容旧版本）。默认返回 `410`，仅在 `ALLOW_LEGACY_OTP_PATH=true` 时启用。
 
 **URL 参数**:
 
@@ -664,14 +804,16 @@ GitHub,user@example.com,JBSWY3DPEHPK3PXP,TOTP,6,30,SHA1
 **查询参数** (可选):
 
 - `type` (String): OTP 类型 (`totp`, `hotp`)，默认 `totp`
-- `timeStep` (Number): TOTP 时间步长（秒），默认 `30`
+- `period` (Number): TOTP 时间步长（秒），默认 `30`
 - `digits` (Number): OTP 位数，默认 `6`
+- `algorithm` (String): 哈希算法，默认 `SHA1`
 - `counter` (Number): HOTP 计数器（仅 HOTP）
+- `format` (String): `html` 或 `json`，默认 `html`
 
 **请求示例**:
 
 ```http
-GET /otp/JBSWY3DPEHPK3PXP?type=totp&digits=6 HTTP/1.1
+GET /otp/JBSWY3DPEHPK3PXP?type=TOTP&digits=6&period=30&format=json HTTP/1.1
 Host: 2fa.example.com
 ```
 
@@ -679,11 +821,7 @@ Host: 2fa.example.com
 
 ```json
 {
-	"otp": "123456",
-	"timeRemaining": 25,
-	"timestamp": "2025-10-24T10:30:00.000Z",
-	"type": "totp",
-	"nextOtp": "654321"
+	"token": "123456"
 }
 ```
 
@@ -977,7 +1115,8 @@ Host: 2fa.example.com
 | **登录** (`/api/login`)             | 5 次     | 1 分钟   | `login`     |
 | **标准 API** (`/api/secrets` CRUD)  | 30 次    | 1 分钟   | `api`       |
 | **敏感操作** (删除、导出)           | 10 次    | 1 分钟   | `sensitive` |
-| **批量操作** (`/api/secrets/batch`) | 5 次     | 5 分钟   | `bulk`      |
+| **批量操作** (`/api/secrets/batch`) | 20 次    | 5 分钟   | `bulk`      |
+| **统计查询** (`/api/secrets/stats`) | 30 次    | 1 分钟   | `api`       |
 | **OTP 生成** (`/otp/*`)             | 100 次   | 1 分钟   | `global`    |
 | **备份管理** (`/api/backup`)        | 5 次     | 1 分钟   | -           |
 | **备份查询** (`/api/backups`)       | 30 次    | 1 分钟   | `api`       |
@@ -1112,21 +1251,21 @@ if (response.ok) {
 #### 生成 OTP
 
 ```javascript
-const response = await fetch('https://2fa.example.com/api/generate-otp', {
+const response = await fetch('https://2fa.example.com/api/otp/generate', {
 	method: 'POST',
 	headers: {
 		'Content-Type': 'application/json',
 	},
-	credentials: 'include',
 	body: JSON.stringify({
 		secret: 'JBSWY3DPEHPK3PXP',
-		type: 'totp',
+		type: 'TOTP',
+		digits: 6,
+		period: 30,
 	}),
 });
 
 const result = await response.json();
-console.log('当前 OTP:', result.otp);
-console.log('剩余时间:', result.timeRemaining, '秒');
+console.log('当前 OTP:', result.token);
 ```
 
 ### cURL
@@ -1160,10 +1299,17 @@ curl -X POST https://2fa.example.com/api/secrets \
   }'
 ```
 
-#### 生成 OTP（无需认证）
+#### 生成 OTP（安全方式，无需认证）
 
 ```bash
-curl https://2fa.example.com/otp/JBSWY3DPEHPK3PXP
+curl -X POST https://2fa.example.com/api/otp/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "secret": "JBSWY3DPEHPK3PXP",
+    "type": "TOTP",
+    "digits": 6,
+    "period": 30
+  }'
 ```
 
 ### Python

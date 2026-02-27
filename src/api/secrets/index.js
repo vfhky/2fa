@@ -30,7 +30,7 @@ export { handleBackupSecrets, handleGetBackups } from './backup.js';
 export { handleExportBackup, handleRestoreBackup } from './restore.js';
 
 // OTP 生成处理器
-export { handleGenerateOTP } from './otp.js';
+export { handleGenerateOTP, handleGenerateOTPFromBody } from './otp.js';
 
 // 共享工具函数（内部使用或测试）
 export { saveSecretsToKV, getAllSecrets } from './shared.js';

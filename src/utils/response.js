@@ -10,11 +10,6 @@
 
 import { getSecurityHeaders } from './security.js';
 
-// 性能优化：缓存默认 CORS headers，避免重复创建对象
-const DEFAULT_CORS_HEADERS = {
-	'Access-Control-Allow-Origin': '*',
-};
-
 // 性能优化：只警告一次（避免在循环中重复打印降低性能）
 let hasWarnedMissingRequest = false;
 
@@ -47,26 +42,17 @@ export function createJsonResponse(data, status = 200, request = null, additiona
 			...additionalHeaders, // 额外的 headers 优先级更高
 		};
 	} else {
-		// 向后兼容：如果没有提供 request，使用旧的 CORS 配置
+		// 未提供 request 时，不自动放宽 CORS（安全优先）
 		// 性能优化：只警告一次
 		if (!hasWarnedMissingRequest) {
-			console.warn('⚠️ createJsonResponse 未提供 request 参数，使用默认 CORS 配置');
+			console.warn('⚠️ createJsonResponse 未提供 request 参数，未注入动态安全头');
 			hasWarnedMissingRequest = true;
 		}
 
-		// 性能优化：复用缓存的默认 headers
-		if (Object.keys(additionalHeaders).length === 0) {
-			headers = {
-				'Content-Type': 'application/json',
-				...DEFAULT_CORS_HEADERS,
-			};
-		} else {
-			headers = {
-				'Content-Type': 'application/json',
-				...DEFAULT_CORS_HEADERS,
-				...additionalHeaders,
-			};
-		}
+		headers = {
+			'Content-Type': 'application/json',
+			...additionalHeaders,
+		};
 	}
 
 	return new Response(JSON.stringify(data), {

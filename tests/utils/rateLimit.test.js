@@ -404,7 +404,7 @@ describe('Rate Limiting Utils', () => {
       expect(body.resetAt).toBeDefined();
     });
 
-    it('没有 request 参数时应该包含 CORS 头', () => {
+    it('没有 request 参数时不应自动放宽 CORS', () => {
       const rateLimitInfo = {
         allowed: false,
         remaining: 0,
@@ -414,9 +414,9 @@ describe('Rate Limiting Utils', () => {
 
       const response = createRateLimitResponse(rateLimitInfo);
 
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
-      expect(response.headers.get('Access-Control-Allow-Methods')).toBeDefined();
-      expect(response.headers.get('Access-Control-Allow-Headers')).toBeDefined();
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+      expect(response.headers.get('Access-Control-Allow-Methods')).toBeNull();
+      expect(response.headers.get('Access-Control-Allow-Headers')).toBeNull();
     });
   });
 

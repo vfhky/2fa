@@ -13,6 +13,7 @@ import { getLogger } from '../../utils/logger.js';
 import { decryptData } from '../../utils/encryption.js';
 import { validateRequest, restoreBackupSchema } from '../../utils/validation.js';
 import { createJsonResponse, createErrorResponse, createSuccessResponse } from '../../utils/response.js';
+import { getSecurityHeaders } from '../../utils/security.js';
 import { ValidationError, NotFoundError, StorageError, CryptoError, errorToResponse, logError } from '../../utils/errors.js';
 
 /**
@@ -228,14 +229,14 @@ export async function handleExportBackup(request, env, backupKey) {
 		});
 
 		// 返回文件
+		const securityHeaders = getSecurityHeaders(request, { includeCSP: false });
 		const response = new Response(content, {
 			status: 200,
 			headers: {
+				...securityHeaders,
 				'Content-Type': contentType,
 				'Content-Disposition': `attachment; filename="${filename}"`,
-				'Access-Control-Allow-Origin': '*',
-				'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-				'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+				'Cache-Control': 'no-store',
 			},
 		});
 
@@ -339,7 +340,7 @@ export async function handleRestoreBackup(request, env) {
 					encrypted: true,
 				});
 			} catch (error) {
-				return createErrorResponse('解密失败', `无法解密备份文件：${error.message}。可能使用了错误的加密密钥。`, 500);
+				return createErrorResponse('解密失败', `无法解密备份文件：${error.message}。可能使用了错误的加密密钥。`, 500, request);
 			}
 		} else {
 			// 明文备份，直接解析
@@ -350,20 +351,23 @@ export async function handleRestoreBackup(request, env) {
 					encrypted: false,
 				});
 			} catch (error) {
-				return createErrorResponse('解析失败', `备份文件格式错误：${error.message}`, 400);
+				return createErrorResponse('解析失败', `备份文件格式错误：${error.message}`, 400, request);
 			}
 		}
 
 		// 如果是预览模式，只返回备份内容
 		if (isPreview) {
-			return createSuccessResponse({
-				message: '备份预览获取成功',
-				backupKey: backupKey,
-				secrets: backupData.secrets || [],
-				count: backupData.count || 0,
-				timestamp: backupData.timestamp,
-				encrypted: isEncrypted,
-			});
+			return createSuccessResponse(
+				{
+					backupKey: backupKey,
+					secrets: backupData.secrets || [],
+					count: backupData.count || 0,
+					timestamp: backupData.timestamp,
+					encrypted: isEncrypted,
+				},
+				'备份预览获取成功',
+				request,
+			);
 		}
 
 		if (!backupData.secrets || !Array.isArray(backupData.secrets)) {
@@ -381,14 +385,18 @@ export async function handleRestoreBackup(request, env) {
 			wasEncrypted: isEncrypted,
 		});
 
-		return createJsonResponse({
-			success: true,
-			message: `恢复备份成功，共恢复 ${backupData.secrets.length} 个密钥`,
-			backupKey: backupKey,
-			count: backupData.secrets.length,
-			timestamp: backupData.timestamp,
-			sourceEncrypted: isEncrypted,
-		});
+		return createJsonResponse(
+			{
+				success: true,
+				message: `恢复备份成功，共恢复 ${backupData.secrets.length} 个密钥`,
+				backupKey: backupKey,
+				count: backupData.secrets.length,
+				timestamp: backupData.timestamp,
+				sourceEncrypted: isEncrypted,
+			},
+			200,
+			request,
+		);
 	} catch (error) {
 		// 如果是已知的错误类型，记录并转换
 		if (

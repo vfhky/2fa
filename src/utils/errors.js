@@ -1,3 +1,5 @@
+import { getSecurityHeaders } from './security.js';
+
 /**
  * 统一错误分类系统
  * 提供一致的错误处理和响应格式
@@ -171,22 +173,24 @@ export function isOperationalError(error) {
  * @returns {Response} HTTP响应
  */
 export function errorToResponse(error, _request = null) {
-	// 导入 response 工具
-	// 注意：为避免循环依赖，这里内联实现
-	const getSecurityHeaders = () => {
+	const buildResponseHeaders = (request) => {
+		if (!request) {
+			return {
+				'Content-Type': 'application/json',
+				'X-Content-Type-Options': 'nosniff',
+			};
+		}
+
 		return {
+			...getSecurityHeaders(request),
 			'Content-Type': 'application/json',
-			'X-Content-Type-Options': 'nosniff',
-			'Access-Control-Allow-Origin': '*',
-			'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-			'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 		};
 	};
 
 	if (error instanceof AppError) {
 		return new Response(JSON.stringify(error.toJSON()), {
 			status: error.statusCode,
-			headers: getSecurityHeaders(),
+			headers: buildResponseHeaders(_request),
 		});
 	}
 
@@ -200,7 +204,7 @@ export function errorToResponse(error, _request = null) {
 		}),
 		{
 			status: 500,
-			headers: getSecurityHeaders(),
+			headers: buildResponseHeaders(_request),
 		},
 	);
 }

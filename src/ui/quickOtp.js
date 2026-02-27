@@ -133,8 +133,6 @@ export function createQuickOtpPage(otp, options = {}) {
 			'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
 			Pragma: 'no-cache',
 			Expires: '0',
-			'Access-Control-Allow-Origin': '*', // 公开 API 允许跨域访问
-			'Access-Control-Allow-Methods': 'GET, OPTIONS',
 		},
 	});
 }

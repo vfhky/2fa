@@ -43,12 +43,18 @@ crons = ["0 16 * * *"]
 # 注意：版本号由部署脚本注入，此处的值仅用于本地开发
 [vars]
 SW_VERSION = "v1"
+REQUIRE_ENCRYPTION = "true"
+ALLOW_LEGACY_OTP_PATH = "false"
 
 # ====================================
 # 开发/测试环境配置
 # ====================================
 [env.development]
 name = "2fa-dev"
+
+[env.development.vars]
+REQUIRE_ENCRYPTION = "false"
+ALLOW_LEGACY_OTP_PATH = "true"
 
 # [[env.development.kv_namespaces]]
 # binding = "SECRETS_KV"

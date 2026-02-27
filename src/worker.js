@@ -16,7 +16,8 @@
 import { handleRequest, handleCORS } from './router/handler.js';
 import { decryptSecrets } from './utils/encryption.js';
 import { encryptData } from './utils/encryption.js';
-import { getLogger, createRequestLogger, PerformanceTimer } from './utils/logger.js';
+import { ensureEncryptionConfigured } from './utils/encryption.js';
+import { getLogger, createRequestLogger, PerformanceTimer, sanitizeUrlForLog } from './utils/logger.js';
 import { getMonitoring, ErrorSeverity } from './utils/monitoring.js';
 import { KV_KEYS } from './utils/constants.js';
 
@@ -294,9 +295,10 @@ export default {
 
 		// 开始请求追踪
 		const timer = requestLogger.logRequest(request, env);
+		const safeUrl = sanitizeUrlForLog(request.url);
 		const traceId = monitoring.getPerformanceMonitor().startTrace(`${request.method} ${new URL(request.url).pathname}`, {
 			method: request.method,
-			url: request.url,
+			url: safeUrl,
 			userAgent: request.headers.get('user-agent'),
 			cf: request.cf,
 		});
@@ -329,7 +331,7 @@ export default {
 				'Request handling failed',
 				{
 					method: request.method,
-					url: request.url,
+					url: safeUrl,
 					traceId,
 				},
 				error,
@@ -340,7 +342,7 @@ export default {
 				error,
 				{
 					method: request.method,
-					url: request.url,
+					url: safeUrl,
 					traceId,
 					userAgent: request.headers.get('user-agent'),
 				},
@@ -443,6 +445,8 @@ export default {
 
 			logger.info('检测到数据变化，开始创建备份');
 			timer.checkpoint('开始备份');
+
+			ensureEncryptionConfigured(env);
 
 			// 创建备份数据结构
 			const backupData = {

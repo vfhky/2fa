@@ -6,6 +6,7 @@
 
 import { createErrorResponse } from '../utils/response.js';
 import { getLogger } from '../utils/logger.js';
+import { getSecurityHeaders } from '../utils/security.js';
 
 /**
  * Favicon API 上游源配置
@@ -49,9 +50,17 @@ const FAVICON_SOURCES = [
  */
 export async function handleFaviconProxy(request, env, domain) {
 	const logger = getLogger(env);
+	let normalizedDomain = domain;
+	try {
+		normalizedDomain = decodeURIComponent(domain || '')
+			.trim()
+			.toLowerCase();
+	} catch {
+		normalizedDomain = (domain || '').trim().toLowerCase();
+	}
 
 	// 验证域名格式
-	if (!domain || !isValidDomain(domain)) {
+	if (!normalizedDomain || !isValidDomain(normalizedDomain)) {
 		return createErrorResponse('无效域名', '请提供有效的域名', 400, request);
 	}
 
@@ -60,8 +69,8 @@ export async function handleFaviconProxy(request, env, domain) {
 
 	for (const source of FAVICON_SOURCES) {
 		try {
-			const faviconUrl = source.url(domain);
-			logger.debug(`尝试从 ${source.name} 获取 favicon`, { domain, url: faviconUrl });
+			const faviconUrl = source.url(normalizedDomain);
+			logger.debug(`尝试从 ${source.name} 获取 favicon`, { domain: normalizedDomain, url: faviconUrl });
 
 			// 使用 AbortController 实现超时
 			const controller = new AbortController();
@@ -80,43 +89,44 @@ export async function handleFaviconProxy(request, env, domain) {
 
 				// 检查响应状态
 				if (response.ok && response.headers.get('content-type')?.startsWith('image/')) {
-					logger.info(`成功从 ${source.name} 获取 favicon`, { domain });
+					logger.info(`成功从 ${source.name} 获取 favicon`, { domain: normalizedDomain });
+					const securityHeaders = getSecurityHeaders(request, { includeCSP: false, includeCredentials: false });
 
 					// 克隆响应并添加缓存头
 					return new Response(response.body, {
 						status: response.status,
 						statusText: response.statusText,
 						headers: {
+							...securityHeaders,
 							'Content-Type': response.headers.get('content-type') || 'image/x-icon',
 							'Cache-Control': 'public, max-age=86400', // 缓存24小时
 							'X-Favicon-Source': source.name,
-							'Access-Control-Allow-Origin': '*',
 						},
 					});
 				}
 
 				// 非图片响应或错误状态，尝试下一个源
 				lastError = new Error(`${source.name} 返回非成功状态: ${response.status}`);
-				logger.warn(`${source.name} 获取失败`, { domain, status: response.status });
+				logger.warn(`${source.name} 获取失败`, { domain: normalizedDomain, status: response.status });
 			} catch (fetchError) {
 				clearTimeout(timeoutId);
 
 				if (fetchError.name === 'AbortError') {
 					lastError = new Error(`${source.name} 请求超时`);
-					logger.warn(`${source.name} 请求超时`, { domain, timeout: source.timeout });
+					logger.warn(`${source.name} 请求超时`, { domain: normalizedDomain, timeout: source.timeout });
 				} else {
 					lastError = fetchError;
-					logger.warn(`${source.name} 请求失败`, { domain, error: fetchError.message });
+					logger.warn(`${source.name} 请求失败`, { domain: normalizedDomain, error: fetchError.message });
 				}
 			}
 		} catch (error) {
 			lastError = error;
-			logger.error(`${source.name} 处理失败`, { domain, error: error.message });
+			logger.error(`${source.name} 处理失败`, { domain: normalizedDomain, error: error.message });
 		}
 	}
 
 	// 所有源都失败，返回错误
-	logger.error('所有 favicon 源都失败', { domain, lastError: lastError?.message });
+	logger.error('所有 favicon 源都失败', { domain: normalizedDomain, lastError: lastError?.message });
 
 	// 返回 404，但不返回错误 JSON（让客户端的 img onerror 处理）
 	return new Response('', {
@@ -136,13 +146,43 @@ export async function handleFaviconProxy(request, env, domain) {
  * @returns {boolean} 是否有效
  */
 function isValidDomain(domain) {
-	// 基本的域名格式验证
-	const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+	// 至少包含一个点，且每段标签符合 RFC 长度限制
+	const domainRegex = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+	const normalizedDomain = domain.toLowerCase().trim();
 
 	// 检查是否包含危险字符
-	if (domain.includes('..') || domain.includes('//') || domain.includes('@')) {
+	if (normalizedDomain.includes('..') || normalizedDomain.includes('//') || normalizedDomain.includes('@')) {
 		return false;
 	}
 
-	return domainRegex.test(domain) && domain.length <= 253;
+	// SSRF 防护：拒绝本地/内网常见目标
+	if (
+		normalizedDomain === 'localhost' ||
+		normalizedDomain.endsWith('.localhost') ||
+		normalizedDomain.endsWith('.local') ||
+		normalizedDomain.endsWith('.internal')
+	) {
+		return false;
+	}
+
+	// SSRF 防护：拒绝 IP 直连（IPv4/IPv6）
+	if (isIPv4Address(normalizedDomain) || isIPv6Address(normalizedDomain)) {
+		return false;
+	}
+
+	return domainRegex.test(normalizedDomain);
+}
+
+function isIPv4Address(value) {
+	const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+	if (!ipv4Regex.test(value)) {
+		return false;
+	}
+
+	const parts = value.split('.').map((part) => parseInt(part, 10));
+	return parts.every((part) => part >= 0 && part <= 255);
+}
+
+function isIPv6Address(value) {
+	return value.includes(':');
 }

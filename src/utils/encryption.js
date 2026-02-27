@@ -18,6 +18,38 @@
 import { ValidationError, ConfigurationError, ErrorFactory } from './errors.js';
 
 /**
+ * 是否启用强制加密模式
+ * 规则：
+ * 1. REQUIRE_ENCRYPTION 显式配置优先
+ * 2. 未显式配置时，根据环境标识自动判断 production
+ */
+export function isEncryptionEnforced(env = {}) {
+	const explicit = env.REQUIRE_ENCRYPTION;
+	if (explicit === true || explicit === 'true') {
+		return true;
+	}
+	if (explicit === false || explicit === 'false') {
+		return false;
+	}
+
+	const mode = String(env.ENVIRONMENT || env.NODE_ENV || env.WORKER_ENV || '')
+		.toLowerCase()
+		.trim();
+	return mode === 'production' || mode === 'prod';
+}
+
+/**
+ * 在强制加密模式下，确保 ENCRYPTION_KEY 已配置
+ */
+export function ensureEncryptionConfigured(env = {}) {
+	if (isEncryptionEnforced(env) && !env.ENCRYPTION_KEY) {
+		throw ErrorFactory.missingConfig('ENCRYPTION_KEY', {
+			hint: '当前为强制加密模式，请配置 ENCRYPTION_KEY 或显式设置 REQUIRE_ENCRYPTION=false（仅限开发环境）',
+		});
+	}
+}
+
+/**
  * 从环境变量获取加密密钥（内部函数）
  * @param {Object} env - 环境变量对象
  * @returns {Promise<CryptoKey>} 加密密钥
@@ -182,6 +214,8 @@ export async function generateEncryptionKey() {
  * @returns {Promise<string>} 加密后的密钥列表
  */
 export async function encryptSecrets(secrets, env) {
+	ensureEncryptionConfigured(env);
+
 	if (!env.ENCRYPTION_KEY) {
 		console.warn('⚠️  ENCRYPTION_KEY 未配置，数据将以明文存储！强烈建议配置加密密钥。');
 		// 向后兼容：如果没有配置加密密钥，返回明文 JSON
@@ -216,6 +250,7 @@ export async function decryptSecrets(data, env) {
 	} else {
 		// 数据未加密（旧数据），直接解析
 		if (!env.ENCRYPTION_KEY) {
+			ensureEncryptionConfigured(env);
 			console.log('✅ 未配置 ENCRYPTION_KEY，使用明文模式');
 		} else {
 			console.warn('⚠️  检测到未加密的数据，建议尽快迁移到加密存储');
@@ -265,6 +300,14 @@ function base64ToArrayBuffer(base64) {
 export async function validateEncryptionConfig(env) {
 	// 检查是否配置了加密密钥
 	if (!env.ENCRYPTION_KEY) {
+		if (isEncryptionEnforced(env)) {
+			return {
+				configured: false,
+				valid: false,
+				message: '当前为强制加密模式，但未配置 ENCRYPTION_KEY。请先配置加密密钥。',
+			};
+		}
+
 		return {
 			configured: false,
 			valid: true, // 未配置密钥也是有效的（使用明文模式）

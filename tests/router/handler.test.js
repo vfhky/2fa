@@ -390,7 +390,7 @@ describe('Router Handler', () => {
 
       const response = await handleRequest(request, env);
 
-      expect(handleGetSecrets).toHaveBeenCalledWith(env);
+      expect(handleGetSecrets).toHaveBeenCalledWith(request, env);
       expect(response.status).toBe(200);
     });
 
@@ -440,18 +440,6 @@ describe('Router Handler', () => {
       expect(response.status).toBe(200);
     });
 
-    it('应该拒绝 /api/secrets/batch 的不支持方法', async () => {
-      const request = createMockRequest({
-        method: 'GET',
-        pathname: '/api/secrets/batch'
-      });
-      const env = createMockEnv();
-
-      const response = await handleRequest(request, env);
-
-      expect(response.status).toBe(405);
-    });
-
     it('应该处理 DELETE /api/secrets/batch', async () => {
       const { handleBatchDeleteSecrets } = await import('../../src/api/secrets/index.js');
 
@@ -466,6 +454,18 @@ describe('Router Handler', () => {
 
       expect(handleBatchDeleteSecrets).toHaveBeenCalledWith(request, env);
       expect(response.status).toBe(200);
+    });
+
+    it('应该拒绝 /api/secrets/batch 的不支持方法', async () => {
+      const request = createMockRequest({
+        method: 'GET',
+        pathname: '/api/secrets/batch'
+      });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(response.status).toBe(405);
     });
 
     it('应该处理 GET /api/secrets/stats', async () => {
@@ -678,20 +678,34 @@ describe('Router Handler', () => {
 
       const response = await handleRequest(request, env);
 
-      expect(handleGenerateOTP).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP', request);
-      expect(response.status).toBe(200);
+      expect(handleGenerateOTP).not.toHaveBeenCalled();
+      expect(response.status).toBe(410);
+      const body = await response.json();
+      expect(body.message).toContain('/api/otp/generate');
     });
 
     it('应该处理带参数的 /otp/{secret}', async () => {
       const { handleGenerateOTP } = await import('../../src/api/secrets/index.js');
 
       // 查询参数在 URL 中，不在 pathname 中
-      const request = createMockRequest({ pathname: '/otp/JBSWY3DPEHPK3PXP' });
+      const request = createMockRequest({ pathname: '/otp/JBSWY3DPEHPK3PXP?digits=8&period=60' });
       const env = createMockEnv();
 
       const response = await handleRequest(request, env);
 
-      // 路由器只从 pathname 提取 secret，查询参数通过 request 传递
+      expect(handleGenerateOTP).not.toHaveBeenCalled();
+      expect(response.status).toBe(410);
+    });
+
+    it('开启兼容开关时应该处理 /otp/{secret}', async () => {
+      const { handleGenerateOTP } = await import('../../src/api/secrets/index.js');
+
+      const request = createMockRequest({ pathname: '/otp/JBSWY3DPEHPK3PXP' });
+      const env = createMockEnv();
+      env.ALLOW_LEGACY_OTP_PATH = 'true';
+
+      const response = await handleRequest(request, env);
+
       expect(handleGenerateOTP).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP', request);
       expect(response.status).toBe(200);
     });
@@ -825,7 +839,7 @@ describe('Router Handler', () => {
     });
 
     it('公开 OTP 路由不需要认证', async () => {
-      const { requiresAuth } = await import('../../src/utils/auth.js');
+      const { requiresAuth, verifyAuthWithDetails } = await import('../../src/utils/auth.js');
       const { handleGenerateOTP } = await import('../../src/api/secrets/index.js');
 
       requiresAuth.mockReturnValueOnce(false);
@@ -835,8 +849,9 @@ describe('Router Handler', () => {
 
       const response = await handleRequest(request, env);
 
-      expect(handleGenerateOTP).toHaveBeenCalled();
-      expect(response.status).toBe(200);
+      expect(verifyAuthWithDetails).not.toHaveBeenCalled();
+      expect(handleGenerateOTP).not.toHaveBeenCalled();
+      expect(response.status).toBe(410);
     });
   });
 

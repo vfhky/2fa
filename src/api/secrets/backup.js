@@ -13,7 +13,7 @@
 import { getAllSecrets } from './shared.js';
 import { getLogger } from '../../utils/logger.js';
 import { checkRateLimit, getClientIdentifier, createRateLimitResponse, RATE_LIMIT_PRESETS } from '../../utils/rateLimit.js';
-import { encryptData, decryptData } from '../../utils/encryption.js';
+import { encryptData, decryptData, ensureEncryptionConfigured } from '../../utils/encryption.js';
 import { createJsonResponse, createErrorResponse } from '../../utils/response.js';
 import { saveDataHash } from '../../worker.js';
 import { ValidationError, StorageError, CryptoError, BusinessLogicError, errorToResponse, logError } from '../../utils/errors.js';
@@ -40,7 +40,7 @@ export async function handleBackupSecrets(request, env) {
 				limit: rateLimitInfo.limit,
 				resetAt: rateLimitInfo.resetAt,
 			});
-			return createRateLimitResponse(rateLimitInfo);
+			return createRateLimitResponse(rateLimitInfo, request);
 		}
 
 		logger.info('开始执行手动备份任务', {
@@ -52,6 +52,8 @@ export async function handleBackupSecrets(request, env) {
 		const secrets = await getAllSecrets(env);
 
 		if (secrets && secrets.length > 0) {
+			ensureEncryptionConfigured(env);
+
 			// 创建备份数据结构
 			const backupData = {
 				timestamp: new Date().toISOString(),
@@ -99,14 +101,18 @@ export async function handleBackupSecrets(request, env) {
 			// 更新数据哈希值（手动备份也需要更新哈希值）
 			await saveDataHash(env, secrets);
 
-			return createJsonResponse({
-				success: true,
-				message: `备份完成，共备份 ${secrets.length} 个密钥`,
-				backupKey: backupKey,
-				count: secrets.length,
-				timestamp: backupData.timestamp,
-				encrypted: isEncrypted,
-			});
+			return createJsonResponse(
+				{
+					success: true,
+					message: `备份完成，共备份 ${secrets.length} 个密钥`,
+					backupKey: backupKey,
+					count: secrets.length,
+					timestamp: backupData.timestamp,
+					encrypted: isEncrypted,
+				},
+				200,
+				request,
+			);
 		} else {
 			throw new BusinessLogicError('没有密钥需要备份', {
 				operation: 'backup',
@@ -117,7 +123,7 @@ export async function handleBackupSecrets(request, env) {
 		// 如果是已知的错误类型，记录并转换
 		if (error instanceof BusinessLogicError || error instanceof StorageError || error instanceof CryptoError) {
 			logError(error, logger, { operation: 'handleBackupSecrets' });
-			return errorToResponse(error);
+			return errorToResponse(error, request);
 		}
 
 		// 未知错误
@@ -128,7 +134,7 @@ export async function handleBackupSecrets(request, env) {
 			},
 			error,
 		);
-		return createErrorResponse('备份失败', `备份过程中发生错误：${error.message}`, 500);
+		return createErrorResponse('备份失败', `备份过程中发生错误：${error.message}`, 500, request);
 	}
 }
 

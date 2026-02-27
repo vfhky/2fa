@@ -401,7 +401,6 @@ describe('Auth.js Integration Tests', () => {
         body: { credential: testPassword }
       });
       const loginResponse = await handleLogin(loginRequest, env);
-      const loginData = await getResponseJson(loginResponse);
       // 从 Cookie 头提取 token
       const setCookieHeader = loginResponse.headers.get('Set-Cookie');
       const tokenMatch = setCookieHeader?.match(/auth_token=([^;]+)/);
@@ -498,7 +497,6 @@ describe('Auth.js Integration Tests', () => {
         body: { credential: testPassword }
       });
       const loginResponse = await handleLogin(loginRequest, env);
-      const loginData = await getResponseJson(loginResponse);
       // 从 Cookie 头提取 token
       const setCookieHeader = loginResponse.headers.get('Set-Cookie');
       const tokenMatch = setCookieHeader?.match(/auth_token=([^;]+)/);
@@ -517,13 +515,15 @@ describe('Auth.js Integration Tests', () => {
 
       const data = await getResponseJson(response);
       expect(data.success).toBe(true);
-      expect(data.token).toBeDefined();
-      expect(data.token).not.toBe(validToken); // 新token应该不同
+      expect(data.token).toBeUndefined();
+      const refreshedToken = extractCookie(response, 'auth_token');
+      expect(refreshedToken).toBeDefined();
+      expect(refreshedToken).not.toBe(validToken); // 新token应该不同
 
       // 验证新 token 有效 - 通过使用它访问受保护资源
       const authRequest = createMockRequest({
         pathname: '/api/secrets',
-        cookies: { auth_token: data.token }
+        cookies: { auth_token: refreshedToken }
       });
       const isAuthorized = await verifyAuth(authRequest, env);
       expect(isAuthorized).toBe(true);
@@ -569,7 +569,9 @@ describe('Auth.js Integration Tests', () => {
 
       const response = await handleRefreshToken(request, env);
       const data = await getResponseJson(response);
-      const newToken = data.token;
+      expect(data.success).toBe(true);
+      const newToken = extractCookie(response, 'auth_token');
+      expect(newToken).toBeDefined();
 
       // 解析新 token 的过期时间
       const parts = newToken.split('.');
@@ -720,7 +722,9 @@ describe('Auth.js Integration Tests', () => {
       expect(refreshResponse.status).toBe(200);
 
       const refreshData = await getResponseJson(refreshResponse);
-      const newToken = refreshData.token;
+      expect(refreshData.success).toBe(true);
+      const newToken = extractCookie(refreshResponse, 'auth_token');
+      expect(newToken).toBeDefined();
 
       // Step 5: 使用新 token 访问受保护资源
       const newAuthRequest = createMockRequest({
@@ -785,7 +789,8 @@ describe('Auth.js Integration Tests', () => {
 
       const data = await getResponseJson(successResponse);
       expect(data.success).toBe(true);
-      expect(data.token).toBeDefined();
+      const token = extractCookie(successResponse, 'auth_token');
+      expect(token).toBeDefined();
     });
   });
 

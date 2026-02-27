@@ -67,7 +67,7 @@ describe('Response Utils', () => {
       expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     });
 
-    it('不带 request 参数时应该使用默认 CORS 配置', async () => {
+    it('不带 request 参数时不应自动放宽 CORS', async () => {
       // 导入重置函数（用于测试）
       const { _resetWarningFlag } = await import('../../src/utils/response.js');
       _resetWarningFlag(); // 重置警告标志，确保此测试能触发警告
@@ -76,7 +76,7 @@ describe('Response Utils', () => {
 
       const response = createJsonResponse({ test: 'data' });
 
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         expect.stringContaining('createJsonResponse 未提供 request 参数')
       );

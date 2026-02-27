@@ -22,6 +22,7 @@ import {
 	ConflictError,
 	StorageError,
 	CryptoError,
+	ConfigurationError,
 	ErrorFactory,
 	errorToResponse,
 	logError,
@@ -33,10 +34,16 @@ const monitoring = getMonitoring();
 /**
  * 获取所有密钥列表
  *
- * @param {Object} env - Cloudflare Workers 环境对象
+ * @param {Request|Object} requestOrEnv - HTTP 请求对象或 env（向后兼容）
+ * @param {Object} [maybeEnv] - Cloudflare Workers 环境对象
  * @returns {Response} 密钥列表响应
  */
-export async function handleGetSecrets(env) {
+export async function handleGetSecrets(requestOrEnv, maybeEnv = null) {
+	const isRequest =
+		requestOrEnv && typeof requestOrEnv === 'object' && typeof requestOrEnv.method === 'string' && typeof requestOrEnv.url === 'string';
+	const request = isRequest ? requestOrEnv : null;
+	const env = isRequest ? maybeEnv : requestOrEnv;
+
 	const logger = getLogger(env);
 	const timer = new PerformanceTimer('GetSecrets', logger);
 
@@ -49,17 +56,22 @@ export async function handleGetSecrets(env) {
 
 		timer.end({ count: secrets.length });
 
-		return createJsonResponse(secrets);
+		return createJsonResponse(secrets, 200, request);
 	} catch (error) {
 		timer.cancel();
 
 		// 如果是已知的错误类型，记录并转换
-		if (error instanceof StorageError || error instanceof CryptoError || error instanceof ValidationError) {
+		if (
+			error instanceof StorageError ||
+			error instanceof CryptoError ||
+			error instanceof ValidationError ||
+			error instanceof ConfigurationError
+		) {
 			logError(error, logger, { operation: 'handleGetSecrets' });
 			if (monitoring && monitoring.getErrorMonitor) {
 				monitoring.getErrorMonitor().captureError(error, { operation: 'handleGetSecrets' }, ErrorSeverity.ERROR);
 			}
-			return errorToResponse(error);
+			return errorToResponse(error, request);
 		}
 
 		// 未知错误
@@ -67,7 +79,7 @@ export async function handleGetSecrets(env) {
 		if (monitoring && monitoring.getErrorMonitor) {
 			monitoring.getErrorMonitor().captureError(error, { operation: 'handleGetSecrets' }, ErrorSeverity.ERROR);
 		}
-		return createErrorResponse('获取密钥列表失败', `从存储中获取密钥时发生错误: ${error.message}`, 500);
+		return createErrorResponse('获取密钥列表失败', `从存储中获取密钥时发生错误: ${error.message}`, 500, request);
 	}
 }
 
@@ -286,7 +298,7 @@ export async function handleDeleteSecret(request, env) {
 
 		if (!rateLimitInfo.allowed) {
 			logger.warn('删除密钥被限流', { clientIP, operation: 'handleDeleteSecret' });
-			return createRateLimitResponse(rateLimitInfo);
+			return createRateLimitResponse(rateLimitInfo, request);
 		}
 
 		const url = new URL(request.url);
@@ -315,7 +327,7 @@ export async function handleDeleteSecret(request, env) {
 			name: deletedSecret.name,
 		});
 
-		return createSuccessResponse({ id: secretId }, '密钥删除成功');
+		return createSuccessResponse({ id: secretId }, '密钥删除成功', request);
 	} catch (error) {
 		// 如果是已知的错误类型，记录并转换
 		if (
@@ -328,7 +340,7 @@ export async function handleDeleteSecret(request, env) {
 			if (monitoring && monitoring.getErrorMonitor) {
 				monitoring.getErrorMonitor().captureError(error, { operation: 'handleDeleteSecret' }, ErrorSeverity.WARNING);
 			}
-			return errorToResponse(error);
+			return errorToResponse(error, request);
 		}
 
 		// 未知错误
@@ -336,6 +348,6 @@ export async function handleDeleteSecret(request, env) {
 		if (monitoring && monitoring.getErrorMonitor) {
 			monitoring.getErrorMonitor().captureError(error, { operation: 'handleDeleteSecret' }, ErrorSeverity.ERROR);
 		}
-		return createErrorResponse('删除密钥失败', `删除密钥操作时发生内部错误`, 500);
+		return createErrorResponse('删除密钥失败', `删除密钥操作时发生内部错误`, 500, request);
 	}
 }

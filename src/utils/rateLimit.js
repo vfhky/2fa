@@ -399,9 +399,7 @@ export function createRateLimitResponse(rateLimitInfo, request = null) {
 			...headers,
 		};
 	} else {
-		headers['Access-Control-Allow-Origin'] = '*';
-		headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-		headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+		headers['X-Content-Type-Options'] = 'nosniff';
 	}
 
 	return new Response(

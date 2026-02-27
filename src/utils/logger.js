@@ -39,6 +39,37 @@ const LogLevelIcons = {
 	[LogLevel.FATAL]: '💀',
 };
 
+const SENSITIVE_QUERY_PARAMS = new Set(['secret', 'token', 'password', 'credential', 'auth', 'key', 'otp']);
+
+/**
+ * 脱敏 URL，避免敏感信息写入日志
+ * - /otp/{secret} -> /otp/[REDACTED]
+ * - query 中的 secret/token/password 等参数 -> [REDACTED]
+ */
+export function sanitizeUrlForLog(rawUrl) {
+	if (!rawUrl || typeof rawUrl !== 'string') {
+		return rawUrl;
+	}
+
+	try {
+		const url = new URL(rawUrl);
+
+		if (url.pathname.startsWith('/otp/')) {
+			url.pathname = '/otp/[REDACTED]';
+		}
+
+		for (const key of [...url.searchParams.keys()]) {
+			if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
+				url.searchParams.set(key, '[REDACTED]');
+			}
+		}
+
+		return url.toString();
+	} catch {
+		return rawUrl;
+	}
+}
+
 /**
  * Logger 类 - 结构化日志记录器
  */
@@ -378,7 +409,7 @@ export function createRequestLogger(logger = null) {
 
 			log.info('📥 Incoming request', {
 				method: request.method,
-				url: request.url,
+				url: sanitizeUrlForLog(request.url),
 				headers: this._sanitizeHeaders(request.headers),
 				cf: request.cf,
 				userAgent: request.headers.get('user-agent'),

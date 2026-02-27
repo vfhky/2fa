@@ -6,7 +6,7 @@
  *
  * 特点:
  * - 公开访问（无需认证）
- * - 支持 CORS（跨域访问）
+ * - 默认同源访问（不开放任意跨域）
  * - 支持 HTML 和 JSON 两种响应格式
  * - 支持高级 OTP 参数（type, digits, period, algorithm, counter）
  */
@@ -31,7 +31,7 @@ import { getLogger } from '../../utils/logger.js';
  * @param {Request} request - HTTP请求对象（可选，用于获取参数）
  * @returns {Response} HTTP响应
  */
-export async function handleGenerateOTP(secret, request = null) {
+export async function handleGenerateOTP(secret, request = null, optionOverrides = null) {
 	// 动态导入（减少初始加载）
 	const { validateBase32, validateOTPParams } = await import('../../utils/validation.js');
 	const { generateOTP } = await import('../../otp/generator.js');
@@ -41,13 +41,11 @@ export async function handleGenerateOTP(secret, request = null) {
 		// 如果没有密钥，返回使用说明
 		const origin = request ? new URL(request.url).origin : '';
 		return new Response(
-			`Missing secret parameter!\n\nUsage: ${origin}/otp/YOUR_SECRET_KEY\nExample: ${origin}/otp/JBSWY3DPEHPK3PXP\n\nAPI Mode: ${origin}/otp/YOUR_SECRET_KEY?format=json\n\nAdvanced Options:\n- ?type=TOTP|HOTP\n- ?digits=6|8\n- ?period=30|60\n- ?algorithm=SHA1|SHA256|SHA512\n- ?counter=0 (for HOTP)`,
+			`Missing secret parameter!\n\n安全模式（推荐）:\nPOST ${origin}/api/otp/generate\nBody: {"secret":"YOUR_SECRET_KEY","type":"TOTP","digits":6,"period":30,"algorithm":"SHA1"}\n\n兼容模式（默认禁用）:\n${origin}/otp/YOUR_SECRET_KEY?format=json`,
 			{
 				status: 400,
 				headers: {
 					'Content-Type': 'text/plain; charset=utf-8',
-					'Access-Control-Allow-Origin': '*', // 公开 API 允许跨域
-					'Access-Control-Allow-Methods': 'GET, OPTIONS',
 					'Cache-Control': 'no-store', // 不缓存错误响应
 				},
 			},
@@ -83,10 +81,34 @@ export async function handleGenerateOTP(secret, request = null) {
 			format = url.searchParams.get('format') || 'html'; // 支持 ?format=json
 
 			// 验证OTP参数
-			const otpValidation = validateOTPParams({ type, digits, period, algorithm, counter });
-			if (!otpValidation.valid) {
-				return createErrorResponse('OTP参数验证失败', otpValidation.errors.join('; '), 400, request);
+		}
+
+		// 请求体参数优先级高于 URL 查询参数
+		if (optionOverrides && typeof optionOverrides === 'object') {
+			if (optionOverrides.type !== undefined) {
+				type = String(optionOverrides.type || 'TOTP');
 			}
+			if (optionOverrides.digits !== undefined) {
+				digits = parseInt(optionOverrides.digits, 10);
+			}
+			if (optionOverrides.period !== undefined) {
+				period = parseInt(optionOverrides.period, 10);
+			}
+			if (optionOverrides.algorithm !== undefined) {
+				algorithm = String(optionOverrides.algorithm || 'SHA1');
+			}
+			if (optionOverrides.counter !== undefined) {
+				counter = parseInt(optionOverrides.counter, 10);
+			}
+			if (optionOverrides.format !== undefined) {
+				format = String(optionOverrides.format || 'json');
+			}
+		}
+
+		// 验证OTP参数
+		const otpValidation = validateOTPParams({ type, digits, period, algorithm, counter });
+		if (!otpValidation.valid) {
+			return createErrorResponse('OTP参数验证失败', otpValidation.errors.join('; '), 400, request);
 		}
 
 		const loadTime = Math.floor(Date.now() / 1000);
@@ -109,11 +131,39 @@ export async function handleGenerateOTP(secret, request = null) {
 		logger.error(
 			'OTP生成失败',
 			{
-				secretPreview: secret ? secret.substring(0, 8) + '...' : 'null',
+				secretLength: secret ? secret.length : 0,
 				errorMessage: error.message,
 			},
 			error,
 		);
 		return createErrorResponse('OTP生成失败', `生成验证码时发生内部错误：${error.message}。请检查密钥格式是否正确或稍后重试`, 500, request);
 	}
+}
+
+/**
+ * 安全模式：通过 POST Body 传入 secret，避免 URL 泄漏
+ * @param {Request} request - HTTP 请求对象
+ * @returns {Response} JSON 响应
+ */
+export async function handleGenerateOTPFromBody(request) {
+	let body;
+	try {
+		body = await request.json();
+	} catch {
+		return createErrorResponse('请求格式错误', '请求体必须是有效的 JSON', 400, request);
+	}
+
+	const secret = typeof body?.secret === 'string' ? body.secret.trim() : '';
+	if (!secret) {
+		return createErrorResponse('缺少密钥', '请在请求体中提供 secret 字段', 400, request);
+	}
+
+	return handleGenerateOTP(secret, request, {
+		type: body.type,
+		digits: body.digits,
+		period: body.period,
+		algorithm: body.algorithm,
+		counter: body.counter,
+		format: 'json',
+	});
 }

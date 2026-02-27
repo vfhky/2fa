@@ -661,7 +661,6 @@ export async function handleLogin(request, env) {
 			JSON.stringify({
 				success: true,
 				message: '登录成功',
-				token: jwtToken, // 同时在响应 body 中返回 token（供测试和客户端使用）
 				expiresAt: expiryDate.toISOString(),
 				expiresIn: `${JWT_EXPIRY_DAYS}天`,
 			}),
@@ -768,7 +767,6 @@ export async function handleRefreshToken(request, env) {
 			JSON.stringify({
 				success: true,
 				message: '令牌刷新成功',
-				token: newToken, // 同时在响应 body 中返回 token（供测试和客户端使用）
 				expiresAt: expiryDate.toISOString(),
 				expiresIn: `${JWT_EXPIRY_DAYS}天`,
 			}),
@@ -818,6 +816,7 @@ export function requiresAuth(pathname) {
 		'/api/login', // 登录接口
 		'/api/refresh-token', // Token 刷新接口（已在内部验证）
 		'/api/setup', // 首次设置接口
+		'/api/otp/generate', // 安全 OTP 生成接口（POST Body）
 		'/setup', // 设置页面
 		'/manifest.json', // PWA manifest
 		'/sw.js', // Service Worker

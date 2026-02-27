@@ -18,7 +18,7 @@
  * - 备份按时间戳排序，最早的备份优先被删除
  */
 
-import { encryptData } from './encryption.js';
+import { encryptData, ensureEncryptionConfigured } from './encryption.js';
 import { getLogger } from './logger.js';
 import { getMonitoring } from './monitoring.js';
 
@@ -145,6 +145,8 @@ class BackupManager {
 				secretCount: secrets.length,
 				lastBackup: this.lastBackupTime ? new Date(this.lastBackupTime).toISOString() : 'never',
 			});
+
+			ensureEncryptionConfigured(this.env);
 
 			// 创建备份数据
 			const backupData = {

@@ -151,6 +151,27 @@ async function getPendingOperations() {
 }
 
 /**
+ * 清空所有待同步操作（安全加固：升级后清理历史敏感离线数据）
+ */
+async function clearAllOperations() {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+
+    await new Promise((resolve, reject) => {
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+
+    console.log('[SW] 已清空历史离线操作队列');
+  } catch (error) {
+    console.warn('[SW] 清空离线操作队列失败:', error);
+  }
+}
+
+/**
  * 删除已同步操作
  * @param {string} operationId - 操作ID
  * @returns {Promise<void>}
@@ -268,11 +289,13 @@ self.addEventListener('activate', event => {
             return caches.delete(cacheName);
           })
       );
-    }).then(() => {
-      console.log('[SW] Service Worker 激活完成');
-      // 立即控制所有页面
-      return self.clients.claim();
     })
+      .then(() => clearAllOperations())
+      .then(() => {
+        console.log('[SW] Service Worker 激活完成');
+        // 立即控制所有页面
+        return self.clients.claim();
+      })
   );
 });
 
@@ -319,102 +342,19 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // API 请求：网络优先，失败时保存到离线队列
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(request).catch(async err => {
-        console.error('[SW] API 请求失败:', url.pathname, err);
-
-        // 只有修改数据的请求才保存到离线队列（POST、PUT、DELETE）
-        const method = request.method.toUpperCase();
-        if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
-          try {
-            // 读取请求体
-            const requestClone = request.clone();
-            let requestBody = null;
-
-            try {
-              requestBody = await requestClone.json();
-            } catch (jsonError) {
-              console.warn('[SW] 无法解析请求体为 JSON:', jsonError);
-              requestBody = await requestClone.text();
-            }
-
-            // 确定操作类型
-            let operationType = 'UNKNOWN';
-            if (method === 'POST' && url.pathname === '/api/secrets') {
-              operationType = 'ADD';
-            } else if (method === 'POST' && url.pathname === '/api/secrets/batch') {
-              operationType = 'BATCH_ADD';
-            } else if (method === 'PUT' && url.pathname.startsWith('/api/secrets/')) {
-              operationType = 'UPDATE';
-            } else if (method === 'DELETE' && url.pathname.startsWith('/api/secrets/')) {
-              operationType = 'DELETE';
-            }
-
-            // 保存到 IndexedDB
-            const operation = {
-              type: operationType,
-              url: url.pathname,
-              method: method,
-              data: requestBody,
-              headers: {
-                'Content-Type': request.headers.get('Content-Type') || 'application/json'
-              }
-            };
-
-            const operationId = await saveOperation(operation);
-            console.log('[SW] 离线操作已保存，等待同步:', operationId, operationType);
-
-            // 注册 Background Sync
-            try {
-              await self.registration.sync.register('sync-operations');
-              console.log('[SW] Background Sync 已注册');
-            } catch (syncError) {
-              console.warn('[SW] Background Sync 注册失败:', syncError);
-            }
-
-            // 通知前端操作已排队
-            return new Response(
-              JSON.stringify({
-                success: true,
-                queued: true,
-                operationId: operationId,
-                message: '您处于离线状态，操作已保存，网络恢复后将自动同步',
-                offline: true
-              }),
-              {
-                status: 202, // Accepted
-                statusText: 'Accepted - Queued for sync',
-                headers: { 'Content-Type': 'application/json' }
-              }
-            );
-          } catch (saveError) {
-            console.error('[SW] 保存离线操作失败:', saveError);
-            // 如果保存失败，返回标准错误
-            return new Response(
-              JSON.stringify({
-                error: '网络连接失败',
-                detail: '无法连接到服务器，且无法保存离线操作',
-                offline: true
-              }),
-              {
-                status: 503,
-                statusText: 'Service Unavailable',
-                headers: { 'Content-Type': 'application/json' }
-              }
-            );
-          }
-        }
-
-        // GET 请求失败时返回标准错误（不保存到队列）
-        return new Response(
-          JSON.stringify({
-            error: '网络连接失败',
-            detail: '无法连接到服务器，请检查网络连接',
-            offline: true
-          }),
-          {
+	  // API 请求：网络优先，失败时保存到离线队列
+	  if (url.pathname.startsWith('/api/')) {
+	    event.respondWith(
+	      fetch(request).catch(async err => {
+	        console.error('[SW] API 请求失败:', url.pathname, err);
+	        // 安全加固：禁用密钥写操作离线落盘，避免敏感数据保存在浏览器存储
+	        return new Response(
+	          JSON.stringify({
+	            error: '网络连接失败',
+	            detail: '无法连接到服务器。为保护密钥安全，离线状态下不缓存写操作。',
+	            offline: true
+	          }),
+	          {
             status: 503,
             statusText: 'Service Unavailable',
             headers: { 'Content-Type': 'application/json' }
@@ -747,21 +687,21 @@ self.addEventListener('message', event => {
     self.skipWaiting();
   }
   
-  if (event.data && event.data.type === 'CLEAR_CACHE') {
-    event.waitUntil(
-      caches.keys().then(cacheNames => {
-        return Promise.all(
+	  if (event.data && event.data.type === 'CLEAR_CACHE') {
+	    event.waitUntil(
+	      caches.keys().then(cacheNames => {
+	        return Promise.all(
           cacheNames.map(cacheName => {
             console.log('[SW] 清除缓存:', cacheName);
             return caches.delete(cacheName);
           })
         );
-      }).then(() => {
-        console.log('[SW] 所有缓存已清除');
-        event.ports[0].postMessage({ success: true });
-      })
-    );
-  }
+	      }).then(() => clearAllOperations()).then(() => {
+	        console.log('[SW] 所有缓存已清除');
+	        event.ports[0].postMessage({ success: true });
+	      })
+	    );
+	  }
   
   if (event.data && event.data.type === 'GET_VERSION') {
     event.ports[0].postMessage({ version: CACHE_NAME });
@@ -777,7 +717,6 @@ console.log('[SW] Service Worker 脚本已加载');
 			'Content-Type': 'application/javascript; charset=utf-8',
 			'Cache-Control': 'no-cache, no-store, must-revalidate',
 			'Service-Worker-Allowed': '/',
-			'Access-Control-Allow-Origin': '*',
 		},
 	});
 }
