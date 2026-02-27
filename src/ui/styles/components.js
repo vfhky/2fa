@@ -2,17 +2,186 @@
  * 组件样式模块
  */
 export function getComponentStyles() {
-	return `    .secrets-list {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
+	return `    .main-list-toolbar {
+      margin-top: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--border-primary);
+      border-radius: 10px;
+      background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .main-list-summary {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 600;
+      letter-spacing: 0.1px;
+    }
+
+    .main-list-page-size-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .main-list-page-size-label select {
+      border: 1px solid var(--border-primary);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border-radius: 6px;
+      font-size: 12px;
+      padding: 4px 6px;
+      min-width: 72px;
+      height: 28px;
+    }
+
+    .secrets-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
       justify-content: center;
       margin: 0 auto;
     }
 
+    .secrets-group {
+      border: 1px solid var(--border-primary);
+      border-radius: 12px;
+      background: var(--bg-elevated);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+
+    .secrets-group.menu-open {
+      overflow: visible;
+    }
+
+    .secrets-group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-primary);
+    }
+
+    .secrets-group-name {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .group-service-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      background: var(--bg-primary);
+      border: 1px solid var(--border-secondary);
+      overflow: hidden;
+    }
+
+    .group-service-icon img {
+      width: 18px;
+      height: 18px;
+      object-fit: contain;
+      border-radius: 4px;
+    }
+
+    .group-service-icon.has-logo {
+      background: transparent;
+      border-color: transparent;
+    }
+
+    .group-service-icon.has-logo img {
+      width: 22px;
+      height: 22px;
+      border-radius: 0;
+    }
+
+    .group-service-name {
+      font-size: 14px;
+      color: var(--text-primary);
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .secrets-group-count {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-primary);
+    }
+
+    .secrets-group-cards {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      padding: 10px 12px 12px;
+      background: var(--bg-primary);
+    }
+
+    .secrets-group-cards .secret-card {
+      --secret-card-radius: 10px;
+      border-color: var(--border-primary);
+      box-shadow: none;
+      border-radius: var(--secret-card-radius);
+    }
+
+    .secrets-group-cards .secret-card:hover {
+      border-color: var(--border-secondary);
+      box-shadow: var(--shadow-sm);
+      transform: translateY(-1px);
+    }
+
+    .secrets-pagination {
+      margin-top: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-primary);
+      border-radius: 10px;
+      background: var(--bg-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .secrets-pagination .btn {
+      min-width: 88px;
+    }
+
+    .secrets-page-info {
+      min-width: 90px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
     .secret-card {
       background: var(--card-bg);
-      border-radius: 12px;
+      --secret-card-radius: 12px;
+      border-radius: var(--secret-card-radius);
       padding: 16px;
       padding-top: 20px;
       border: 1px solid var(--card-border);
@@ -22,6 +191,7 @@ export function getComponentStyles() {
       box-shadow: var(--card-shadow);
       margin-bottom: 0;
       cursor: pointer;
+      z-index: 0;
       -webkit-user-select: none;
       -moz-user-select: none;
       -ms-user-select: none;
@@ -33,6 +203,11 @@ export function getComponentStyles() {
       border-color: var(--card-hover-border);
       box-shadow: var(--card-hover-shadow);
       transform: translateY(-1px);
+      z-index: 1;
+    }
+
+    .secret-card.menu-open {
+      z-index: 20;
     }
 
     .secret-header {
@@ -40,14 +215,6 @@ export function getComponentStyles() {
       justify-content: space-between;
       align-items: flex-start;
       margin-bottom: 12px;
-    }
-
-    .secret-info {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-width: 0;
     }
 
     .card-header {
@@ -59,32 +226,10 @@ export function getComponentStyles() {
 
     .secret-info {
       display: flex;
-      align-items: flex-start;
-      gap: 12px;
+      align-items: center;
+      gap: 8px;
       flex: 1;
       min-width: 0;
-    }
-
-    .service-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      font-weight: bold;
-      font-size: 16px;
-      color: var(--text-secondary);
-      background: var(--bg-secondary);
-      border: 1px solid var(--card-border);
-    }
-
-    .service-icon img {
-      width: 30px;
-      height: 30px;
-      object-fit: contain;
-      border-radius: 6px;
     }
 
     .secret-text {
@@ -157,19 +302,38 @@ export function getComponentStyles() {
       background: var(--danger-light) !important;
     }
 
-    .secret-text h3 {
+    .secret-account {
       color: var(--text-primary);
       font-size: 16px;
       font-weight: 600;
-      margin: 0 0 1px 0;
+      margin: 0;
       line-height: 1.3;
       word-break: break-word;
     }
 
-    .secret-text p {
+    .secret-account-placeholder {
+      color: var(--text-tertiary);
+      font-weight: 500;
+      font-style: italic;
+    }
+
+    .secret-type-tag {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
       color: var(--text-secondary);
-      font-size: 13px;
-      margin: 0;
+      border: 1px solid var(--border-secondary);
+      vertical-align: middle;
+    }
+
+    .secret-counter {
+      color: var(--text-secondary);
+      font-size: 12px;
+      margin: 2px 0 0;
       line-height: 1.4;
       word-break: break-word;
     }
@@ -329,19 +493,34 @@ export function getComponentStyles() {
     }
 
     .progress-top {
-      width: 100%;
-      height: 1px;
-      background: var(--bg-primary);
-      border-radius: 0;
+      width: calc(100% + 2px);
+      height: calc(var(--secret-card-radius) + 2px);
+      background: transparent;
+      border-top-left-radius: calc(var(--secret-card-radius) + 1px);
+      border-top-right-radius: calc(var(--secret-card-radius) + 1px);
       overflow: hidden;
+      position: absolute;
+      top: -1px;
+      left: -1px;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .progress-top::before {
+      content: '';
       position: absolute;
       top: 0;
       left: 0;
-      right: 0;
+      width: 100%;
+      height: 2px;
+      background: var(--progress-bg);
     }
 
     .progress-top-fill {
-      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 2px;
       background: var(--progress-fill);
       border-radius: 0;
       transition: width 1s linear, background-color 0.5s ease;

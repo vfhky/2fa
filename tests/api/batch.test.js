@@ -4,7 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { handleBatchAddSecrets } from '../../src/api/secrets/batch.js';
+import { handleBatchAddSecrets, handleBatchDeleteSecrets } from '../../src/api/secrets/batch.js';
+import { handleGetSecretsStats } from '../../src/api/secrets/stats.js';
 
 // Mock KV 存储
 class MockKV {
@@ -55,14 +56,19 @@ function createMockEnv() {
 
 // 创建 Mock Request
 function createMockRequest(body = {}, method = 'POST', url = 'https://example.com/api/secrets/batch') {
-  return new Request(url, {
+  const requestInit = {
     method,
     headers: {
       'Content-Type': 'application/json',
       'X-Forwarded-For': '203.0.113.1'
-    },
-    body: JSON.stringify(body)
-  });
+    }
+  };
+
+  if (body !== null && body !== undefined && method !== 'GET' && method !== 'HEAD') {
+    requestInit.body = JSON.stringify(body);
+  }
+
+  return new Request(url, requestInit);
 }
 
 describe('Batch Import API Module', () => {
@@ -540,6 +546,195 @@ describe('Batch Import API Module', () => {
       expect(data.successCount).toBe(50);
       expect(data.failCount).toBe(0);
       expect(data.results).toHaveLength(50);
+    });
+  });
+
+  describe('handleBatchDeleteSecrets - 批量删除', () => {
+    it('应该成功批量删除多个密钥', async () => {
+      const env = createMockEnv();
+
+      // 先导入 3 个密钥
+      const addResponse = await handleBatchAddSecrets(
+        createMockRequest({
+          secrets: [
+            { name: 'GitHub', secret: 'JBSWY3DPEHPK3PXP' },
+            { name: 'Google', secret: 'JBSWY3DPEHPK3PXQ' },
+            { name: 'AWS', secret: 'JBSWY3DPEHPK3PXR' }
+          ]
+        }),
+        env
+      );
+      const addData = await addResponse.json();
+      const firstId = addData.results[0].secret.id;
+      const secondId = addData.results[1].secret.id;
+
+      const deleteRequest = createMockRequest(
+        { ids: [firstId, secondId] },
+        'DELETE',
+        'https://example.com/api/secrets/batch'
+      );
+
+      const response = await handleBatchDeleteSecrets(deleteRequest, env);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.successCount).toBe(2);
+      expect(data.failCount).toBe(0);
+      expect(data.deletedIds).toHaveLength(2);
+
+      // 验证剩余数据
+      const statsResponse = await handleGetSecretsStats(
+        createMockRequest(null, 'GET', 'https://example.com/api/secrets/stats'),
+        env
+      );
+      const statsData = await statsResponse.json();
+      expect(statsData.data.overview.totalSecrets).toBe(1);
+    });
+
+    it('应该处理不存在和重复的密钥ID', async () => {
+      const env = createMockEnv();
+
+      const addResponse = await handleBatchAddSecrets(
+        createMockRequest({
+          secrets: [{ name: 'OnlyOne', secret: 'JBSWY3DPEHPK3PXP' }]
+        }),
+        env
+      );
+      const addData = await addResponse.json();
+      const existsId = addData.results[0].secret.id;
+
+      const deleteRequest = createMockRequest(
+        { ids: [existsId, 'not-exists-id', existsId] },
+        'DELETE',
+        'https://example.com/api/secrets/batch'
+      );
+
+      const response = await handleBatchDeleteSecrets(deleteRequest, env);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.successCount).toBe(1);
+      expect(data.failCount).toBe(2);
+      expect(data.results[1].success).toBe(false);
+      expect(data.results[2].success).toBe(false);
+      expect(data.results[2].error).toContain('重复');
+    });
+
+    it('应该验证批量删除请求格式', async () => {
+      const env = createMockEnv();
+
+      const response = await handleBatchDeleteSecrets(
+        createMockRequest(
+          { ids: [] },
+          'DELETE',
+          'https://example.com/api/secrets/batch'
+        ),
+        env
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error || data.message).toBeDefined();
+    });
+  });
+
+  describe('handleGetSecretsStats - 数据统计', () => {
+    it('应该返回完整的统计数据', async () => {
+      const env = createMockEnv();
+
+      await handleBatchAddSecrets(
+        createMockRequest({
+          secrets: [
+            {
+              name: 'GitHub',
+              account: 'user@example.com',
+              secret: 'JBSWY3DPEHPK3PXP',
+              type: 'TOTP',
+              digits: 6,
+              period: 30,
+              algorithm: 'SHA1'
+            },
+            {
+              name: 'GitHub',
+              account: 'dev@example.com',
+              secret: 'MFRGGZDFMZTWQ2LK',
+              type: 'TOTP',
+              digits: 8,
+              period: 60,
+              algorithm: 'SHA256'
+            },
+            {
+              name: 'Server',
+              secret: 'KRSXG5CTMVRXEZLU',
+              type: 'HOTP',
+              counter: 5,
+              algorithm: 'SHA512'
+            }
+          ]
+        }),
+        env
+      );
+
+      const response = await handleGetSecretsStats(
+        createMockRequest(null, 'GET', 'https://example.com/api/secrets/stats'),
+        env
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.data.overview.totalSecrets).toBe(3);
+      expect(data.data.typeDistribution.TOTP).toBe(2);
+      expect(data.data.typeDistribution.HOTP).toBe(1);
+      expect(data.data.algorithmDistribution.SHA1).toBe(1);
+      expect(data.data.algorithmDistribution.SHA256).toBe(1);
+      expect(data.data.algorithmDistribution.SHA512).toBe(1);
+      expect(data.data.digitsDistribution['6']).toBe(2);
+      expect(data.data.digitsDistribution['8']).toBe(1);
+      expect(data.data.overview.uniqueServices).toBe(2);
+      expect(data.data.topServices[0].name).toBe('GitHub');
+      expect(data.data.topServices[0].count).toBe(2);
+    });
+
+    it('应该识别弱密钥和无效密钥', async () => {
+      const env = createMockEnv();
+
+      await env.SECRETS_KV.put(
+        'secrets',
+        JSON.stringify([
+          {
+            id: '1',
+            name: 'Weak',
+            account: '',
+            secret: 'JBSWY3DP',
+            type: 'TOTP',
+            digits: 6,
+            period: 30,
+            algorithm: 'SHA1'
+          },
+          {
+            id: '2',
+            name: 'Invalid',
+            account: '',
+            secret: 'INVALID!@#',
+            type: 'TOTP',
+            digits: 6,
+            period: 30,
+            algorithm: 'SHA1'
+          }
+        ])
+      );
+
+      const response = await handleGetSecretsStats(
+        createMockRequest(null, 'GET', 'https://example.com/api/secrets/stats'),
+        env
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.data.security.weakSecrets).toBe(1);
+      expect(data.data.security.invalidSecrets).toBe(1);
     });
   });
 });

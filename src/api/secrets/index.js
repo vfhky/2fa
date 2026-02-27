@@ -7,7 +7,8 @@
  * 模块组织:
  * - shared.js: 共享工具函数（saveSecretsToKV, getAllSecrets）
  * - crud.js: CRUD 操作（GET, POST, PUT, DELETE）
- * - batch.js: 批量导入（POST batch）
+ * - batch.js: 批量操作（POST batch 导入, DELETE batch 删除）
+ * - stats.js: 统计数据（GET stats）
  * - backup.js: 备份创建和列表（POST, GET backup）
  * - restore.js: 备份恢复和导出（POST restore, GET export）
  * - otp.js: OTP 生成（GET otp）
@@ -17,7 +18,10 @@
 export { handleGetSecrets, handleAddSecret, handleUpdateSecret, handleDeleteSecret } from './crud.js';
 
 // 批量导入处理器
-export { handleBatchAddSecrets } from './batch.js';
+export { handleBatchAddSecrets, handleBatchDeleteSecrets } from './batch.js';
+
+// 统计处理器
+export { handleGetSecretsStats } from './stats.js';
 
 // 备份处理器
 export { handleBackupSecrets, handleGetBackups } from './backup.js';

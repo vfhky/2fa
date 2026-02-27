@@ -41,7 +41,7 @@ export function getSearchCode() {
     }
 
     // 搜索过滤功能
-    async function filterSecrets(query) {
+    async function filterSecrets(query, resetPage = true) {
       const trimmedQuery = query.trim().toLowerCase();
       currentSearchQuery = trimmedQuery;
 
@@ -56,6 +56,9 @@ export function getSearchCode() {
 
       if (!trimmedQuery) {
         filteredSecrets = [...secrets];
+        if (resetPage) {
+          secretsCurrentPage = 1;
+        }
         searchStats.style.display = 'none';
         await renderFilteredSecrets();
         return;
@@ -82,6 +85,10 @@ export function getSearchCode() {
       }
       searchStats.style.display = 'block';
 
+      if (resetPage) {
+        secretsCurrentPage = 1;
+      }
+
       await renderFilteredSecrets();
     }
 
@@ -99,6 +106,7 @@ export function getSearchCode() {
       
       // 保存用户的排序选择
       saveSortPreference(currentSortType);
+      secretsCurrentPage = 1;
       
       await renderFilteredSecrets();
     }

@@ -256,11 +256,15 @@ export function getBaseStyles() {
     }
 
     .search-stats {
-      margin-top: 8px;
-      padding: 0 4px;
+      margin-top: 10px;
+      padding: 6px 10px;
       font-size: 12px;
       color: var(--text-secondary);
       text-align: left;
+      border: 1px solid var(--border-primary);
+      border-radius: 8px;
+      background: var(--bg-secondary);
+      line-height: 1.4;
     }
 
     /* 平板和中等屏幕优化 */
@@ -427,6 +431,11 @@ export function getBaseStyles() {
       flex: 1;
     }
 
+    .submenu-item-danger .item-text,
+    .submenu-item-danger .item-icon {
+      color: var(--danger-dark);
+    }
+
     /* 为每个菜单项添加特色颜色 - 根据新顺序调整 */
     .action-submenu.show .submenu-item:nth-child(1):hover {
       background: linear-gradient(135deg, var(--primary-50) 0%, var(--primary-100) 100%);
@@ -449,11 +458,21 @@ export function getBaseStyles() {
     }
 
     .action-submenu.show .submenu-item:nth-child(5):hover {
+      background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+      color: #c62828;
+    }
+
+    .action-submenu.show .submenu-item:nth-child(6):hover {
+      background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%);
+      color: #00838f;
+    }
+
+    .action-submenu.show .submenu-item:nth-child(7):hover {
       background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
       color: #1976d2;
     }
 
-    .action-submenu.show .submenu-item:nth-child(6):hover {
+    .action-submenu.show .submenu-item:nth-child(8):hover {
       background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%);
       color: #c2185b;
     }
@@ -492,6 +511,14 @@ export function getBaseStyles() {
 
     .action-submenu.show .submenu-item:nth-child(6) {
       transition-delay: 0.3s;
+    }
+
+    .action-submenu.show .submenu-item:nth-child(7) {
+      transition-delay: 0.35s;
+    }
+
+    .action-submenu.show .submenu-item:nth-child(8) {
+      transition-delay: 0.4s;
     }
 
     /* 背景遮罩 */

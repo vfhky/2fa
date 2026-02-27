@@ -11,6 +11,8 @@ import {
 	handleDeleteSecret,
 	handleGenerateOTP,
 	handleBatchAddSecrets,
+	handleBatchDeleteSecrets,
+	handleGetSecretsStats,
 	handleBackupSecrets,
 	handleGetBackups,
 	handleRestoreBackup,
@@ -225,8 +227,20 @@ async function handleApiRequest(pathname, method, request, env) {
 
 	// 批量导入API（必须在 /api/secrets/{id} 之前匹配）
 	if (pathname === '/api/secrets/batch') {
-		if (method === 'POST') {
-			return handleBatchAddSecrets(request, env);
+		switch (method) {
+			case 'POST':
+				return handleBatchAddSecrets(request, env);
+			case 'DELETE':
+				return handleBatchDeleteSecrets(request, env);
+			default:
+				return createErrorResponse('方法不允许', `不支持的HTTP方法: ${method}`, 405, request);
+		}
+	}
+
+	// 统计API（必须在 /api/secrets/{id} 之前匹配）
+	if (pathname === '/api/secrets/stats') {
+		if (method === 'GET') {
+			return handleGetSecretsStats(request, env);
 		}
 		return createErrorResponse('方法不允许', `不支持的HTTP方法: ${method}`, 405, request);
 	}

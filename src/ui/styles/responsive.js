@@ -284,8 +284,6 @@ export function getResponsiveStyles() {
 
       .backup-table tbody tr:hover {
         background: var(--table-row-hover);
-        transform: scale(1.01);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
       }
 
       .backup-table tbody tr:last-child {
@@ -303,7 +301,7 @@ export function getResponsiveStyles() {
         border-right: none;
       }
 
-      .service-name {
+      .backup-service-name {
         font-weight: 600;
         color: var(--text-primary);
         min-width: 120px;
@@ -313,7 +311,7 @@ export function getResponsiveStyles() {
         white-space: nowrap;
       }
 
-      .account-info {
+      .backup-account-info {
         color: var(--text-secondary);
         min-width: 150px;
         max-width: 200px;
@@ -322,7 +320,7 @@ export function getResponsiveStyles() {
         white-space: nowrap;
       }
 
-      .secret-type {
+      .backup-secret-type {
         color: var(--success);
         font-weight: 600;
         text-align: center;
@@ -330,7 +328,7 @@ export function getResponsiveStyles() {
         white-space: nowrap;
       }
 
-      .created-time {
+      .backup-created-time {
         color: var(--text-secondary);
         font-size: 11px;
         min-width: 140px;
@@ -435,6 +433,34 @@ export function getResponsiveStyles() {
         gap: 8px;
         margin-bottom: 15px;
       }
+
+      .main-list-toolbar {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px 12px;
+      }
+
+      .main-list-page-size-label {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      .secrets-group-header {
+        flex-wrap: wrap;
+      }
+
+      .secrets-pagination {
+        flex-wrap: wrap;
+      }
+
+      .secrets-pagination .btn {
+        flex: 1;
+      }
+
+      .secrets-page-info {
+        width: 100%;
+        order: -1;
+      }
       
       .export-button, .import-button {
         font-size: 14px;
@@ -446,7 +472,8 @@ export function getResponsiveStyles() {
         padding: 12px;
         padding-top: 16px;
         margin-bottom: 0;
-        border-radius: 4px;
+        --secret-card-radius: 4px;
+        border-radius: var(--secret-card-radius);
         box-shadow: none;
       }
       
@@ -517,11 +544,8 @@ export function getResponsiveStyles() {
       }
 
       .progress-top {
-        border-radius: 0;
-      }
-
-      .progress-top-fill {
-        border-radius: 0;
+        border-top-left-radius: calc(var(--secret-card-radius) + 1px);
+        border-top-right-radius: calc(var(--secret-card-radius) + 1px);
       }
 
       .modal {
@@ -584,11 +608,9 @@ export function getResponsiveStyles() {
         padding: 8px;
       }
       
-      .secrets-list {
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        justify-content: center;
-        text-align: left;
+      .secrets-group-cards {
+        grid-template-columns: 1fr;
+        gap: 10px;
       }
       
       .content {
@@ -669,7 +691,7 @@ export function getResponsiveStyles() {
       }
 
       /* iPad 和平板两列卡片布局 */
-      .secrets-list {
+      .secrets-group-cards {
         grid-template-columns: 1fr 1fr;
         gap: 14px;
         justify-content: center;
@@ -719,8 +741,6 @@ export function getResponsiveStyles() {
 
       .backup-table tbody tr:hover {
         background: var(--table-row-hover) !important;
-        transform: scale(1.01) !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
       }
 
       .backup-table tbody tr:last-child {
@@ -738,7 +758,7 @@ export function getResponsiveStyles() {
         border-right: none !important;
       }
 
-      .backup-table .service-name {
+      .backup-table .backup-service-name {
         font-weight: 600 !important;
         color: var(--text-primary) !important;
         min-width: 120px !important;
@@ -748,7 +768,7 @@ export function getResponsiveStyles() {
         white-space: nowrap !important;
       }
 
-      .backup-table .account-info {
+      .backup-table .backup-account-info {
         color: var(--text-secondary) !important;
         min-width: 150px !important;
         max-width: 200px !important;
@@ -757,7 +777,7 @@ export function getResponsiveStyles() {
         white-space: nowrap !important;
       }
 
-      .backup-table .secret-type {
+      .backup-table .backup-secret-type {
         color: var(--success) !important;
         font-weight: 600 !important;
         text-align: center !important;
@@ -765,7 +785,7 @@ export function getResponsiveStyles() {
         white-space: nowrap !important;
       }
 
-      .backup-table .created-time {
+      .backup-table .backup-created-time {
         color: var(--text-secondary) !important;
         font-size: 11px !important;
         min-width: 140px !important;
@@ -857,7 +877,7 @@ export function getResponsiveStyles() {
         max-width: 900px;
       }
 
-      .secrets-list {
+      .secrets-group-cards {
         grid-template-columns: 1fr 1fr;
         gap: 16px;
         justify-content: center;
@@ -872,7 +892,8 @@ export function getResponsiveStyles() {
         padding: 20px;
         padding-top: 24px;
         margin-bottom: 0;
-        border-radius: 6px;
+        --secret-card-radius: 6px;
+        border-radius: var(--secret-card-radius);
         box-shadow: none;
       }
 
@@ -892,11 +913,8 @@ export function getResponsiveStyles() {
       }
 
       .progress-top {
-        border-radius: 0;
-      }
-
-      .progress-top-fill {
-        border-radius: 0;
+        border-top-left-radius: calc(var(--secret-card-radius) + 1px);
+        border-top-right-radius: calc(var(--secret-card-radius) + 1px);
       }
 
       /* 确保备份表格在大屏幕端正确显示 */
@@ -938,8 +956,6 @@ export function getResponsiveStyles() {
 
       .backup-table tbody tr:hover {
         background: var(--table-row-hover) !important;
-        transform: scale(1.01) !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
       }
 
       .backup-table tbody tr:last-child {
@@ -957,7 +973,7 @@ export function getResponsiveStyles() {
         border-right: none !important;
       }
 
-      .backup-table .service-name {
+      .backup-table .backup-service-name {
         font-weight: 600 !important;
         color: var(--text-primary) !important;
         min-width: 120px !important;
@@ -967,7 +983,7 @@ export function getResponsiveStyles() {
         white-space: nowrap !important;
       }
 
-      .backup-table .account-info {
+      .backup-table .backup-account-info {
         color: var(--text-secondary) !important;
         min-width: 150px !important;
         max-width: 200px !important;
@@ -976,7 +992,7 @@ export function getResponsiveStyles() {
         white-space: nowrap !important;
       }
 
-      .backup-table .secret-type {
+      .backup-table .backup-secret-type {
         color: var(--success) !important;
         font-weight: 600 !important;
         text-align: center !important;
@@ -984,7 +1000,7 @@ export function getResponsiveStyles() {
         white-space: nowrap !important;
       }
 
-      .backup-table .created-time {
+      .backup-table .backup-created-time {
         color: var(--text-secondary) !important;
         font-size: 11px !important;
         min-width: 140px !important;

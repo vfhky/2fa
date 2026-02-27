@@ -16,6 +16,8 @@ vi.mock('../../src/api/secrets/index.js', () => ({
   handleDeleteSecret: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   handleGenerateOTP: vi.fn(async (secret, request) => new Response(JSON.stringify({ token: '123456' }), { status: 200 })),
   handleBatchAddSecrets: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
+  handleBatchDeleteSecrets: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, deletedCount: 1 }), { status: 200 })),
+  handleGetSecretsStats: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, data: { overview: { totalSecrets: 0 } } }), { status: 200 })),
   handleBackupSecrets: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   handleGetBackups: vi.fn(async (request, env) => new Response(JSON.stringify({ backups: [] }), { status: 200 })),
   handleRestoreBackup: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
@@ -442,6 +444,49 @@ describe('Router Handler', () => {
       const request = createMockRequest({
         method: 'GET',
         pathname: '/api/secrets/batch'
+      });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(response.status).toBe(405);
+    });
+
+    it('应该处理 DELETE /api/secrets/batch', async () => {
+      const { handleBatchDeleteSecrets } = await import('../../src/api/secrets/index.js');
+
+      const request = createMockRequest({
+        method: 'DELETE',
+        pathname: '/api/secrets/batch',
+        body: { ids: ['test-id'] }
+      });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(handleBatchDeleteSecrets).toHaveBeenCalledWith(request, env);
+      expect(response.status).toBe(200);
+    });
+
+    it('应该处理 GET /api/secrets/stats', async () => {
+      const { handleGetSecretsStats } = await import('../../src/api/secrets/index.js');
+
+      const request = createMockRequest({
+        method: 'GET',
+        pathname: '/api/secrets/stats'
+      });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(handleGetSecretsStats).toHaveBeenCalledWith(request, env);
+      expect(response.status).toBe(200);
+    });
+
+    it('应该拒绝 /api/secrets/stats 的不支持方法', async () => {
+      const request = createMockRequest({
+        method: 'POST',
+        pathname: '/api/secrets/stats'
       });
       const env = createMockEnv();
 

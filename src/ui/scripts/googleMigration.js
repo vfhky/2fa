@@ -52,7 +52,7 @@ export function getGoogleMigrationCode() {
           return;
         }
 
-        console.log('成功解析 ' + secrets.length + ' 个密钥:', secrets);
+	        console.log('成功解析 ' + secrets.length + ' 个密钥');
 
         // 关闭扫描器
         hideQRScanner();
@@ -430,16 +430,16 @@ export function getGoogleMigrationCode() {
             '<button class="btn btn-secondary btn-sm" onclick="selectAllExportSecrets(false)">取消全选</button>' +
           '</div>' +
           '<div class="export-secret-list" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 15px;">' +
-            secrets.map(function(s, i) {
-              return '<div class="export-secret-item" style="padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px;">' +
-                '<input type="checkbox" id="export-' + i + '" checked style="width: 18px; height: 18px;">' +
-                '<div style="flex: 1; min-width: 0;">' +
-                  '<div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + (s.name || '未知服务') + '</div>' +
-                  '<div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + (s.account || '') + '</div>' +
-                '</div>' +
-                '<span style="font-size: 11px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: 4px; color: var(--text-tertiary);">' + (s.type || 'TOTP') + '</span>' +
-              '</div>';
-            }).join('') +
+	            secrets.map(function(s, i) {
+	              return '<div class="export-secret-item" style="padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px;">' +
+	                '<input type="checkbox" id="export-' + i + '" checked style="width: 18px; height: 18px;">' +
+	                '<div style="flex: 1; min-width: 0;">' +
+	                  '<div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + escapeHTML(s.name || '未知服务') + '</div>' +
+	                  '<div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + escapeHTML(s.account || '') + '</div>' +
+	                '</div>' +
+	                '<span style="font-size: 11px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: 4px; color: var(--text-tertiary);">' + escapeHTML(s.type || 'TOTP') + '</span>' +
+	              '</div>';
+	            }).join('') +
           '</div>' +
           '<div style="display: flex; gap: 10px;">' +
             '<button class="btn btn-secondary" style="flex: 1;" onclick="closeExportToGoogleModal()">取消</button>' +
@@ -580,12 +580,12 @@ export function getGoogleMigrationCode() {
         const qrDataURL = await generateQRCodeDataURL(migrationURL, { width: 250, height: 250 });
         const container = modal.querySelector('.qr-code-container');
         container.innerHTML = '<img src="' + qrDataURL + '" alt="Migration QR Code" style="width: 250px; height: 250px; border-radius: 8px;">';
-      } catch (error) {
-        console.error('生成二维码失败:', error);
-        const container = modal.querySelector('.qr-code-container');
-        container.innerHTML = '<div style="color: #e74c3c;">❌ 生成失败: ' + error.message + '</div>';
-      }
-    }
+	      } catch (error) {
+	        console.error('生成二维码失败:', error);
+	        const container = modal.querySelector('.qr-code-container');
+	        container.innerHTML = '<div style="color: #e74c3c;">❌ 生成失败: ' + escapeHTML(error.message || '未知错误') + '</div>';
+	      }
+	    }
 
     /**
      * 切换导出二维码页面
@@ -612,6 +612,26 @@ export function getGoogleMigrationCode() {
 
     // ==================== 导入 UI ====================
 
+    function getMigrationPreviewDisplay(secret) {
+      const issuer = (secret && secret.issuer ? String(secret.issuer) : '').trim();
+      const rawName = (secret && secret.name ? String(secret.name) : '').trim();
+      const normalizedType = ((secret && secret.type) ? String(secret.type) : 'totp').toUpperCase();
+
+      let account = rawName;
+      if (issuer && rawName.toLowerCase().startsWith((issuer + ':').toLowerCase())) {
+        account = rawName.slice(issuer.length + 1).trim();
+      }
+
+      const service = issuer || account || '未知服务';
+      const accountDisplay = account && account !== service ? account : '未设置账户';
+
+      return {
+        service,
+        account: accountDisplay,
+        type: normalizedType
+      };
+    }
+
     /**
      * 显示 Google 迁移导入预览
      */
@@ -623,10 +643,7 @@ export function getGoogleMigrationCode() {
       modal.style.display = 'flex';
 
       const content = document.createElement('div');
-      content.className = 'modal-content';
-      content.style.maxWidth = '500px';
-      content.style.maxHeight = '80vh';
-      content.style.overflow = 'auto';
+      content.className = 'modal-content migration-preview-modal';
 
       content.innerHTML =
         '<div class="modal-header">' +
@@ -634,22 +651,26 @@ export function getGoogleMigrationCode() {
           '<button class="close-btn" onclick="closeMigrationPreview()">&times;</button>' +
         '</div>' +
         '<div class="modal-body">' +
-          '<p style="margin-bottom: 15px; color: var(--text-secondary);">检测到 <strong>' + parsedSecrets.length + '</strong> 个密钥，确认导入？</p>' +
-          '<div class="migration-preview-list" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 15px;">' +
+          '<p class="migration-preview-summary">检测到 <strong>' + parsedSecrets.length + '</strong> 个密钥，确认导入？</p>' +
+          '<div class="migration-preview-list">' +
             parsedSecrets.map(function(s, i) {
-              return '<div class="migration-preview-item" style="padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px;">' +
-                '<input type="checkbox" id="migrate-' + i + '" checked style="width: 18px; height: 18px;">' +
-                '<div style="flex: 1; min-width: 0;">' +
-                  '<div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + (s.issuer || s.name || '未知服务') + '</div>' +
-                  '<div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + (s.name || '') + '</div>' +
+              const display = getMigrationPreviewDisplay(s);
+
+              return '<div class="migration-preview-item">' +
+                '<input type="checkbox" id="migrate-' + i + '" checked>' +
+                '<div class="migration-preview-info">' +
+                  '<div class="migration-preview-service">' + escapeHTML(display.service) + '</div>' +
+                  '<div class="migration-preview-account' + (display.account === '未设置账户' ? ' migration-preview-account-placeholder' : '') + '">' +
+                    escapeHTML(display.account) +
+                  '</div>' +
                 '</div>' +
-                '<span style="font-size: 11px; padding: 2px 6px; background: var(--bg-tertiary); border-radius: 4px; color: var(--text-tertiary);">' + s.type + '</span>' +
+                '<span class="migration-preview-type">' + escapeHTML(display.type) + '</span>' +
               '</div>';
             }).join('') +
           '</div>' +
-          '<div style="display: flex; gap: 10px;">' +
-            '<button class="btn btn-secondary" style="flex: 1;" onclick="closeMigrationPreview()">取消</button>' +
-            '<button class="btn btn-primary" style="flex: 1;" onclick="confirmGoogleMigration()">导入选中</button>' +
+          '<div class="migration-preview-actions">' +
+            '<button class="btn btn-secondary" onclick="closeMigrationPreview()">取消</button>' +
+            '<button class="btn btn-primary" onclick="confirmGoogleMigration()">导入选中</button>' +
           '</div>' +
         '</div>';
 
@@ -679,9 +700,11 @@ export function getGoogleMigrationCode() {
     /**
      * 显示导入结果模态框（包含失败详情）
      */
-    function showImportResultModal(successCount, failCount, failedDetails) {
-      // 创建结果模态框
-      const modal = document.createElement('div');
+	    function showImportResultModal(successCount, failCount, failedDetails) {
+	      const safeFailedDetails = escapeHTML(failedDetails || '').replace(/\\n/g, '<br>');
+
+	      // 创建结果模态框
+	      const modal = document.createElement('div');
       modal.id = 'importResultModal';
       modal.className = 'modal';
       modal.style.display = 'flex';
@@ -705,10 +728,10 @@ export function getGoogleMigrationCode() {
               '失败 <span style="color: #f44336; font-weight: bold;">' + failCount + '</span> 个' +
             '</div>' +
           '</div>' +
-          '<div style="background: var(--bg-secondary); border-radius: 8px; padding: 15px; margin-bottom: 15px;">' +
-            '<div style="font-weight: 600; margin-bottom: 10px; color: #f44336;">❌ 失败详情：</div>' +
-            '<div style="font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; line-height: 1.6;">' + failedDetails + '</div>' +
-          '</div>' +
+	          '<div style="background: var(--bg-secondary); border-radius: 8px; padding: 15px; margin-bottom: 15px;">' +
+	            '<div style="font-weight: 600; margin-bottom: 10px; color: #f44336;">❌ 失败详情：</div>' +
+	            '<div style="font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; line-height: 1.6;">' + safeFailedDetails + '</div>' +
+	          '</div>' +
           '<div style="text-align: center;">' +
             '<button class="btn btn-primary" onclick="closeImportResultModal()">确定</button>' +
           '</div>' +

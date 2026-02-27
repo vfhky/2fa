@@ -127,10 +127,25 @@ export function getCoreCode() {
         }
 
         if (!response.ok) {
-          throw new Error('加载失败: ' + response.statusText);
+          let errorMessage = response.statusText || ('HTTP ' + response.status);
+          try {
+            const errorData = await response.clone().json();
+            errorMessage = errorData.message || errorData.error || errorMessage;
+          } catch (_) {
+            try {
+              const errorText = await response.text();
+              if (errorText && errorText.trim()) {
+                errorMessage = errorText.slice(0, 200);
+              }
+            } catch (_) {
+              // 忽略二次解析错误，保留默认错误信息
+            }
+          }
+          throw new Error('加载失败: ' + errorMessage);
         }
 
         secrets = await response.json();
+        statsCache = null; // 数据变更后清空统计缓存
 
         // 成功获取数据后，保存到 localStorage 作为缓存
         try {
@@ -178,9 +193,15 @@ export function getCoreCode() {
       filteredSecrets = [...secrets];
       const searchInput = document.getElementById('searchInput');
       if (searchInput && searchInput.value.trim()) {
-        filterSecrets(searchInput.value);
+        await filterSecrets(searchInput.value, false);
       } else {
         await renderFilteredSecrets();
+      }
+
+      // 如果批量删除弹窗正在显示，同步更新可选列表
+      if (document.getElementById('batchDeleteModal')?.classList.contains('show')) {
+        const keyword = document.getElementById('batchDeleteSearchInput')?.value || '';
+        filterBatchDeleteList(keyword);
       }
     }
 
@@ -200,10 +221,42 @@ export function getCoreCode() {
       return colors[Math.abs(hash) % colors.length];
     }
 
+    function getServiceInitial(serviceName) {
+      const normalizedName = typeof serviceName === 'string' ? serviceName.trim() : '';
+      return (normalizedName.charAt(0) || '#').toUpperCase();
+    }
+
+    function buildServiceIconMarkup(serviceName, logoUrl, iconClassName = 'group-service-icon') {
+      const safeServiceName = escapeHTML(serviceName || '未命名服务');
+      const initial = escapeHTML(getServiceInitial(serviceName));
+
+      if (logoUrl) {
+        return (
+          '<span class="' +
+          iconClassName +
+          ' has-logo' +
+          '">' +
+          '<img src="' +
+          logoUrl +
+          '" alt="' +
+          safeServiceName +
+          '" onerror="this.style.display=&quot;none&quot;; this.parentElement.classList.remove(&quot;has-logo&quot;); this.nextElementSibling.style.display=&quot;flex&quot;;">' +
+          '<span style="display: none;">' +
+          initial +
+          '</span>' +
+          '</span>'
+        );
+      }
+
+      return '<span class="' + iconClassName + '"><span>' + initial + '</span></span>';
+    }
+
     // 创建密钥卡片
     function createSecretCard(secret) {
-      const logoUrl = getServiceLogo(secret.name);
       const isHOTP = secret.type && secret.type.toUpperCase() === 'HOTP';
+      const accountName = (secret.account || '').trim();
+      const accountDisplay = accountName || '未设置账户';
+      const counterText = Number.isInteger(Number(secret.counter)) ? Number(secret.counter) : 0;
 
       return '<div class="secret-card" onclick="copyOTPFromCard(event, &quot;' + secret.id + '&quot;)" title="点击卡片复制验证码">' +
         // TOTP 显示进度条，HOTP 不显示
@@ -214,17 +267,14 @@ export function getCoreCode() {
         ) +
         '<div class="card-header">' +
           '<div class="secret-info">' +
-            '<div class="service-icon">' +
-              (logoUrl ?
-                '<img src="' + logoUrl + '" alt="' + secret.name + '" style="width: 30px; height: 30px; object-fit: contain; border-radius: 6px;" onerror="this.style.display=&quot;none&quot;; this.nextElementSibling.style.display=&quot;block&quot;;">' +
-                '<span style="display: none;">' + secret.name.charAt(0).toUpperCase() + '</span>' :
-                '<span>' + secret.name.charAt(0).toUpperCase() + '</span>'
-              ) +
-            '</div>' +
             '<div class="secret-text">' +
-            '<h3>' + secret.name + (isHOTP ? ' <span style="font-size: 11px; color: var(--text-tertiary); font-weight: 500;">[HOTP]</span>' : '') + '</h3>' +
-            (secret.account ? '<p>' + secret.account + '</p>' : '') +
-            (isHOTP ? '<p style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">计数器: ' + (secret.counter || 0) + '</p>' : '') +
+            '<h3 class="secret-account' +
+            (accountName ? '' : ' secret-account-placeholder') +
+            '">' +
+            escapeHTML(accountDisplay) +
+            (isHOTP ? ' <span class="secret-type-tag">HOTP</span>' : '') +
+            '</h3>' +
+            (isHOTP ? '<p class="secret-counter">计数器: ' + escapeHTML(String(counterText)) + '</p>' : '') +
             '</div>' +
           '</div>' +
           '<div class="card-menu" onclick="event.stopPropagation(); toggleCardMenu(&quot;' + secret.id + '&quot;)">' +
@@ -254,13 +304,200 @@ export function getCoreCode() {
       '</div>';
     }
 
-    // 渲染过滤后的密钥列表
+    function getSecretsServiceName(secret) {
+      const serviceName = (secret && secret.name) ? secret.name.trim() : '';
+      return serviceName || '未命名服务';
+    }
+
+    function buildSecretsGroups(secretList) {
+      const list = Array.isArray(secretList) ? secretList : [];
+      const groupMap = new Map();
+
+      list.forEach((secret, index) => {
+        const serviceName = getSecretsServiceName(secret);
+        const groupKey = serviceName.toLowerCase();
+
+        if (!groupMap.has(groupKey)) {
+          groupMap.set(groupKey, {
+            key: groupKey,
+            name: serviceName,
+            logoUrl: getServiceLogo(serviceName),
+            items: [],
+            firstIndex: index,
+            lastIndex: index,
+          });
+        }
+
+        const group = groupMap.get(groupKey);
+        group.items.push(secret);
+        group.lastIndex = index;
+      });
+
+      const groups = Array.from(groupMap.values());
+
+      groups.forEach((group) => {
+        if (currentSortType === 'newest-first') {
+          group.items = group.items.slice().reverse();
+          return;
+        }
+
+        if (currentSortType === 'account-asc' || currentSortType === 'account-desc') {
+          const sortFactor = currentSortType === 'account-desc' ? -1 : 1;
+          group.items.sort((a, b) => {
+            const accountA = (a.account || '').toLowerCase();
+            const accountB = (b.account || '').toLowerCase();
+            const accountCompare = accountA.localeCompare(accountB, 'zh-CN');
+            if (accountCompare !== 0) {
+              return accountCompare * sortFactor;
+            }
+            return (a.id || '').localeCompare(b.id || '') * sortFactor;
+          });
+          return;
+        }
+
+        if (currentSortType === 'name-asc' || currentSortType === 'name-desc') {
+          group.items.sort((a, b) => {
+            const accountA = (a.account || '').toLowerCase();
+            const accountB = (b.account || '').toLowerCase();
+            const accountCompare = accountA.localeCompare(accountB, 'zh-CN');
+            if (accountCompare !== 0) {
+              return accountCompare;
+            }
+            return (a.id || '').localeCompare(b.id || '');
+          });
+        }
+      });
+
+      groups.sort((a, b) => {
+        switch (currentSortType) {
+          case 'newest-first':
+            return b.lastIndex - a.lastIndex;
+          case 'name-desc':
+          case 'account-desc':
+            return b.name.localeCompare(a.name, 'zh-CN');
+          case 'oldest-first':
+            return a.firstIndex - b.firstIndex;
+          case 'name-asc':
+          case 'account-asc':
+          default:
+            return a.name.localeCompare(b.name, 'zh-CN');
+        }
+      });
+
+      return groups;
+    }
+
+    function prepareSecretsGroups() {
+      secretsGroupedList = buildSecretsGroups(filteredSecrets);
+      const totalPages = Math.max(1, Math.ceil(secretsGroupedList.length / secretsPageSize));
+      secretsCurrentPage = Math.min(Math.max(1, secretsCurrentPage), totalPages);
+
+      const pageSizeSelect = document.getElementById('mainListPageSizeSelect');
+      if (pageSizeSelect) {
+        pageSizeSelect.value = String(secretsPageSize);
+      }
+    }
+
+    function getCurrentPageSecretGroups() {
+      if (!secretsGroupedList || secretsGroupedList.length === 0) {
+        return [];
+      }
+
+      const startIndex = (secretsCurrentPage - 1) * secretsPageSize;
+      return secretsGroupedList.slice(startIndex, startIndex + secretsPageSize);
+    }
+
+    function updateMainListControls(totalSecrets, totalGroups) {
+      const toolbar = document.getElementById('mainListToolbar');
+      const summaryElement = document.getElementById('mainListSummary');
+      const paginationElement = document.getElementById('secretsPagination');
+      const pageInfoElement = document.getElementById('secretsPageInfo');
+      const prevButton = document.getElementById('secretsPrevBtn');
+      const nextButton = document.getElementById('secretsNextBtn');
+
+      const groupCount = Number.isFinite(totalGroups) ? totalGroups : 0;
+      const secretCount = Number.isFinite(totalSecrets) ? totalSecrets : 0;
+      const totalPages = Math.max(1, Math.ceil(groupCount / secretsPageSize));
+      const hasData = groupCount > 0;
+
+      if (toolbar) {
+        toolbar.style.display = hasData ? 'flex' : 'none';
+      }
+
+      if (summaryElement) {
+        summaryElement.textContent =
+          '共 ' +
+          secretCount +
+          ' 个密钥 · ' +
+          groupCount +
+          ' 个服务分组 · 第 ' +
+          secretsCurrentPage +
+          '/' +
+          totalPages +
+          ' 页';
+      }
+
+      if (paginationElement) {
+        paginationElement.style.display = hasData ? 'flex' : 'none';
+      }
+
+      if (pageInfoElement) {
+        pageInfoElement.textContent = '第 ' + secretsCurrentPage + ' / ' + totalPages + ' 页';
+      }
+
+      if (prevButton) {
+        prevButton.disabled = secretsCurrentPage <= 1;
+      }
+
+      if (nextButton) {
+        nextButton.disabled = secretsCurrentPage >= totalPages;
+      }
+    }
+
+    function clearHiddenOTPIntervals(visibleIds = []) {
+      const visibleIdSet = new Set(Array.isArray(visibleIds) ? visibleIds : []);
+      Object.keys(otpIntervals).forEach((secretId) => {
+        if (!visibleIdSet.has(secretId)) {
+          if (otpIntervals[secretId]) {
+            clearInterval(otpIntervals[secretId]);
+            delete otpIntervals[secretId];
+          }
+        }
+      });
+    }
+
+    async function changeSecretsPage(delta) {
+      const totalPages = Math.max(1, Math.ceil(secretsGroupedList.length / secretsPageSize));
+      const targetPage = Math.min(Math.max(1, secretsCurrentPage + delta), totalPages);
+
+      if (targetPage === secretsCurrentPage) {
+        return;
+      }
+
+      secretsCurrentPage = targetPage;
+      await renderFilteredSecrets();
+    }
+
+    async function changeSecretsPageSize(size) {
+      const parsedSize = parseInt(size, 10);
+      if (!Number.isInteger(parsedSize) || parsedSize <= 0) {
+        return;
+      }
+
+      secretsPageSize = parsedSize;
+      secretsCurrentPage = 1;
+      await renderFilteredSecrets();
+    }
+
+    // 渲染过滤后的密钥列表（按服务分组 + 分页）
     async function renderFilteredSecrets() {
       const loading = document.getElementById('loading');
       const secretsList = document.getElementById('secretsList');
       const emptyState = document.getElementById('emptyState');
 
-      loading.style.display = 'none';
+      if (loading) {
+        loading.style.display = 'none';
+      }
 
       if (currentSearchQuery && filteredSecrets.length === 0) {
         secretsList.style.display = 'none';
@@ -270,6 +507,8 @@ export function getCoreCode() {
           '<p>尝试使用不同的关键字搜索</p>' +
           '<button style="margin-top: 15px; padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer;" onclick="clearSearch()">清除搜索</button>';
         emptyState.style.display = 'block';
+        updateMainListControls(0, 0);
+        clearHiddenOTPIntervals([]);
         return;
       }
 
@@ -284,43 +523,57 @@ export function getCoreCode() {
           '数据存储：Cloudflare Workers KV' +
           '</div>';
         emptyState.style.display = 'block';
+        updateMainListControls(0, 0);
+        clearHiddenOTPIntervals([]);
         return;
       }
 
+      prepareSecretsGroups();
+      const currentPageGroups = getCurrentPageSecretGroups();
+      const visibleSecrets = currentPageGroups.flatMap((group) => group.items);
+
       emptyState.style.display = 'none';
-      secretsList.style.display = 'grid';
+      secretsList.style.display = 'flex';
 
-      // 应用排序
-      const sortedSecrets = sortSecrets(filteredSecrets, currentSortType);
+      secretsList.innerHTML = currentPageGroups
+        .map((group) => {
+          return (
+            '<section class="secrets-group">' +
+            '<div class="secrets-group-header">' +
+            '<div class="secrets-group-name">' +
+            buildServiceIconMarkup(group.name, group.logoUrl, 'group-service-icon') +
+            '<span class="group-service-name">' +
+            escapeHTML(group.name) +
+            '</span>' +
+            '</div>' +
+            '<div class="secrets-group-count">' +
+            group.items.length +
+            ' 个账号</div>' +
+            '</div>' +
+            '<div class="secrets-group-cards">' +
+            group.items.map((secret) => createSecretCard(secret)).join('') +
+            '</div>' +
+            '</section>'
+          );
+        })
+        .join('');
 
-      secretsList.innerHTML = sortedSecrets.map(secret => createSecretCard(secret)).join('');
+      updateMainListControls(filteredSecrets.length, secretsGroupedList.length);
 
-      // 🚀 性能优化：并发计算所有OTP
+      // 🚀 性能优化：仅并发计算当前页可见卡片的 OTP
       const perfStart = performance.now();
 
-      // 并发计算所有密钥的OTP（等待全部完成）
-      await Promise.all(
-        sortedSecrets.map(secret => updateOTP(secret.id))
-      );
+      await Promise.all(visibleSecrets.map((secret) => updateOTP(secret.id)));
 
-      // 性能监控日志
       const perfEnd = performance.now();
       const duration = (perfEnd - perfStart).toFixed(2);
-      console.log('[性能优化] ' + sortedSecrets.length + '个密钥的OTP并发计算完成，耗时: ' + duration + 'ms');
+      console.log('[性能优化] 当前页 ' + visibleSecrets.length + '个密钥的OTP并发计算完成，耗时: ' + duration + 'ms');
 
-      // OTP计算完成后再启动定时器
-      sortedSecrets.forEach(secret => {
+      visibleSecrets.forEach((secret) => {
         startOTPInterval(secret.id);
       });
 
-      Object.keys(otpIntervals).forEach(secretId => {
-        if (!filteredSecrets.find(s => s.id === secretId)) {
-          if (otpIntervals[secretId]) {
-            clearInterval(otpIntervals[secretId]);
-            delete otpIntervals[secretId];
-          }
-        }
-      });
+      clearHiddenOTPIntervals(visibleSecrets.map((secret) => secret.id));
     }
 
     // 从卡片点击复制OTP验证码
@@ -355,7 +608,7 @@ export function getCoreCode() {
 
       try {
         await navigator.clipboard.writeText(otpText);
-        showOTPCopyFeedback(secretId);
+        showOTPCopyFeedback(secretId, otpText);
       } catch (err) {
         const textArea = document.createElement('textarea');
         textArea.value = otpText;
@@ -363,15 +616,14 @@ export function getCoreCode() {
         textArea.select();
         document.execCommand('copy');
         document.body.removeChild(textArea);
-        showOTPCopyFeedback(secretId);
+        showOTPCopyFeedback(secretId, otpText);
       }
     }
 
-    function showOTPCopyFeedback(secretId) {
-      const secret = secrets.find(s => s.id === secretId);
-      const serviceName = secret ? secret.name : '验证码';
-      
-      showCenterToast('✅', serviceName + ' 验证码已复制到剪贴板');
+    function showOTPCopyFeedback(secretId, otpCode) {
+      const copiedCode = (otpCode || '').trim();
+      const message = copiedCode ? ('验证码 ' + copiedCode + ' 已复制到剪贴板') : '验证码已复制到剪贴板';
+      showCenterToast('✅', message);
     }
 
     async function copyNextOTP(secretId) {
@@ -386,7 +638,7 @@ export function getCoreCode() {
 
       try {
         await navigator.clipboard.writeText(nextOtpText);
-        showNextOTPCopyFeedback(secretId);
+        showNextOTPCopyFeedback(secretId, nextOtpText);
       } catch (err) {
         const textArea = document.createElement('textarea');
         textArea.value = nextOtpText;
@@ -394,15 +646,14 @@ export function getCoreCode() {
         textArea.select();
         document.execCommand('copy');
         document.body.removeChild(textArea);
-        showNextOTPCopyFeedback(secretId);
+        showNextOTPCopyFeedback(secretId, nextOtpText);
       }
     }
 
-    function showNextOTPCopyFeedback(secretId) {
-      const secret = secrets.find(s => s.id === secretId);
-      const serviceName = secret ? secret.name : '验证码';
-
-      showCenterToast('⏭️', serviceName + ' 下一个验证码已复制到剪贴板');
+    function showNextOTPCopyFeedback(secretId, otpCode) {
+      const copiedCode = (otpCode || '').trim();
+      const message = copiedCode ? ('下一个验证码 ' + copiedCode + ' 已复制到剪贴板') : '下一个验证码已复制到剪贴板';
+      showCenterToast('⏭️', message);
     }
 
     // 复制OTP链接（otpauth://格式）
@@ -467,27 +718,52 @@ export function getCoreCode() {
     function toggleCardMenu(secretId) {
       const dropdown = document.getElementById('menu-' + secretId);
       if (!dropdown) return;
+
+      document.querySelectorAll('.secrets-group.menu-open').forEach(group => {
+        group.classList.remove('menu-open');
+      });
       
       document.querySelectorAll('.card-menu-dropdown').forEach(menu => {
         if (menu.id !== 'menu-' + secretId) {
           menu.classList.remove('show');
+          const parentCard = menu.closest('.secret-card');
+          if (parentCard) {
+            parentCard.classList.remove('menu-open');
+          }
         }
       });
-      
-      dropdown.classList.toggle('show');
+
+      const shouldShow = !dropdown.classList.contains('show');
+      dropdown.classList.toggle('show', shouldShow);
+
+      const currentCard = dropdown.closest('.secret-card');
+      if (currentCard) {
+        currentCard.classList.toggle('menu-open', shouldShow);
+      }
+
+      const currentGroup = dropdown.closest('.secrets-group');
+      if (currentGroup && shouldShow) {
+        currentGroup.classList.add('menu-open');
+      }
     }
     
     function closeAllCardMenus() {
       document.querySelectorAll('.card-menu-dropdown').forEach(menu => {
         menu.classList.remove('show');
+        const parentCard = menu.closest('.secret-card');
+        if (parentCard) {
+          parentCard.classList.remove('menu-open');
+        }
+      });
+
+      document.querySelectorAll('.secrets-group.menu-open').forEach(group => {
+        group.classList.remove('menu-open');
       });
     }
 
     document.addEventListener('click', function(event) {
       if (!event.target.closest('.card-menu')) {
-        document.querySelectorAll('.card-menu-dropdown').forEach(menu => {
-          menu.classList.remove('show');
-        });
+        closeAllCardMenus();
       }
     });
 
@@ -565,7 +841,17 @@ export function getCoreCode() {
 
             // 正常在线响应，立即删除本地数据
             secrets = secrets.filter(s => s.id !== id);
+            statsCache = null;
             await renderSecrets();
+
+            if (document.getElementById('batchDeleteModal')?.classList.contains('show')) {
+              const keyword = document.getElementById('batchDeleteSearchInput')?.value || '';
+              filterBatchDeleteList(keyword);
+            }
+
+            if (document.getElementById('statsModal')?.classList.contains('show')) {
+              refreshStatsData();
+            }
 
             if (otpIntervals[id]) {
               clearInterval(otpIntervals[id]);
@@ -583,6 +869,753 @@ export function getCoreCode() {
       }).catch(err => {
         console.error('❌ [保存队列] 队列执行错误:', err);
       });
+    }
+
+    // ========== 批量删除 ==========
+
+    function showBatchDeleteModal() {
+      if (!secrets || secrets.length === 0) {
+        showCenterToast('ℹ️', '当前没有可删除的密钥');
+        return;
+      }
+
+      batchDeleteSelection = new Set();
+      batchDeleteFilteredSecrets = [...secrets];
+      batchDeleteCurrentPage = 1;
+
+      const searchInput = document.getElementById('batchDeleteSearchInput');
+      if (searchInput) {
+        searchInput.value = '';
+      }
+
+      const pageSizeSelect = document.getElementById('batchDeletePageSizeSelect');
+      if (pageSizeSelect) {
+        pageSizeSelect.value = String(batchDeletePageSize);
+      }
+
+      prepareBatchDeleteGroups();
+      renderBatchDeleteList();
+      showModal('batchDeleteModal');
+    }
+
+    function hideBatchDeleteModal() {
+      hideModal('batchDeleteModal', () => {
+        batchDeleteSelection = new Set();
+        batchDeleteFilteredSecrets = [];
+        batchDeleteGroupedSecrets = [];
+        batchDeleteCurrentPage = 1;
+      });
+    }
+
+    function getBatchDeleteServiceName(secret) {
+      const serviceName = (secret && secret.name) ? secret.name.trim() : '';
+      return serviceName || '未命名服务';
+    }
+
+    function buildBatchDeleteGroups(secretList) {
+      const list = Array.isArray(secretList) ? secretList : [];
+      const groupMap = new Map();
+
+      list.forEach((secret, index) => {
+        const serviceName = getBatchDeleteServiceName(secret);
+        const groupKey = serviceName.toLowerCase();
+
+        if (!groupMap.has(groupKey)) {
+          groupMap.set(groupKey, {
+            key: groupKey,
+            name: serviceName,
+            logoUrl: getServiceLogo(serviceName),
+            items: [],
+            firstIndex: index,
+            lastIndex: index,
+          });
+        }
+
+        const group = groupMap.get(groupKey);
+        group.items.push(secret);
+        group.lastIndex = index;
+      });
+
+      const groups = Array.from(groupMap.values());
+
+      groups.forEach((group) => {
+        group.items.sort((a, b) => {
+          const accountA = (a.account || '').toLowerCase();
+          const accountB = (b.account || '').toLowerCase();
+          const accountCompare = accountA.localeCompare(accountB, 'zh-CN');
+          if (accountCompare !== 0) {
+            return accountCompare;
+          }
+          return (a.id || '').localeCompare(b.id || '');
+        });
+      });
+
+      groups.sort((a, b) => {
+        switch (currentSortType) {
+          case 'newest-first':
+            return b.lastIndex - a.lastIndex;
+          case 'oldest-first':
+            return a.firstIndex - b.firstIndex;
+          case 'name-desc':
+            return b.name.localeCompare(a.name, 'zh-CN');
+          case 'name-asc':
+          default:
+            return a.name.localeCompare(b.name, 'zh-CN');
+        }
+      });
+
+      return groups;
+    }
+
+    function prepareBatchDeleteGroups() {
+      batchDeleteGroupedSecrets = buildBatchDeleteGroups(batchDeleteFilteredSecrets);
+      const totalPages = Math.max(1, Math.ceil(batchDeleteGroupedSecrets.length / batchDeletePageSize));
+      batchDeleteCurrentPage = Math.min(Math.max(1, batchDeleteCurrentPage), totalPages);
+    }
+
+    function getBatchDeleteCurrentPageGroups() {
+      if (!batchDeleteGroupedSecrets || batchDeleteGroupedSecrets.length === 0) {
+        return [];
+      }
+
+      const startIndex = (batchDeleteCurrentPage - 1) * batchDeletePageSize;
+      return batchDeleteGroupedSecrets.slice(startIndex, startIndex + batchDeletePageSize);
+    }
+
+    function filterBatchDeleteList(query) {
+      const keyword = (query || '').trim().toLowerCase();
+
+      if (!keyword) {
+        batchDeleteFilteredSecrets = [...secrets];
+      } else {
+        batchDeleteFilteredSecrets = secrets.filter((secret) => {
+          const name = (secret.name || '').toLowerCase();
+          const account = (secret.account || '').toLowerCase();
+          return name.includes(keyword) || account.includes(keyword);
+        });
+      }
+
+      batchDeleteCurrentPage = 1;
+      prepareBatchDeleteGroups();
+      renderBatchDeleteList();
+    }
+
+    function changeBatchDeletePage(delta) {
+      const totalPages = Math.max(1, Math.ceil(batchDeleteGroupedSecrets.length / batchDeletePageSize));
+      const targetPage = Math.min(Math.max(1, batchDeleteCurrentPage + delta), totalPages);
+
+      if (targetPage === batchDeleteCurrentPage) {
+        return;
+      }
+
+      batchDeleteCurrentPage = targetPage;
+      renderBatchDeleteList();
+    }
+
+    function changeBatchDeletePageSize(size) {
+      const parsedSize = parseInt(size, 10);
+      if (!Number.isInteger(parsedSize) || parsedSize <= 0) {
+        return;
+      }
+
+      batchDeletePageSize = parsedSize;
+      batchDeleteCurrentPage = 1;
+      prepareBatchDeleteGroups();
+      renderBatchDeleteList();
+    }
+
+    function toggleBatchDeleteSelection(id) {
+      if (!id) return;
+
+      if (batchDeleteSelection.has(id)) {
+        batchDeleteSelection.delete(id);
+      } else {
+        batchDeleteSelection.add(id);
+      }
+
+      const listElement = document.getElementById('batchDeleteList');
+      const scrollTop = listElement ? listElement.scrollTop : 0;
+      renderBatchDeleteList();
+      if (listElement) {
+        listElement.scrollTop = scrollTop;
+      }
+    }
+
+    function findBatchDeleteGroupByKey(groupKey) {
+      return batchDeleteGroupedSecrets.find((group) => group.key === groupKey) || null;
+    }
+
+    function toggleBatchDeleteGroupSelection(encodedGroupKey) {
+      const groupKey = decodeURIComponent(encodedGroupKey || '');
+      const group = findBatchDeleteGroupByKey(groupKey);
+      if (!group) {
+        return;
+      }
+
+      const groupIds = group.items.map((secret) => secret.id);
+      const allSelected = groupIds.length > 0 && groupIds.every((id) => batchDeleteSelection.has(id));
+
+      if (allSelected) {
+        groupIds.forEach((id) => batchDeleteSelection.delete(id));
+      } else {
+        groupIds.forEach((id) => batchDeleteSelection.add(id));
+      }
+
+      renderBatchDeleteList();
+    }
+
+    function selectOnlyBatchDeleteGroup(encodedGroupKey) {
+      const groupKey = decodeURIComponent(encodedGroupKey || '');
+      const group = findBatchDeleteGroupByKey(groupKey);
+      if (!group) {
+        return;
+      }
+
+      batchDeleteSelection = new Set(group.items.map((secret) => secret.id));
+      renderBatchDeleteList();
+    }
+
+    function deleteBatchDeleteGroup(encodedGroupKey) {
+      const groupKey = decodeURIComponent(encodedGroupKey || '');
+      const group = findBatchDeleteGroupByKey(groupKey);
+      if (!group || group.items.length === 0) {
+        return;
+      }
+
+      const groupIds = group.items.map((secret) => secret.id);
+      executeBatchDelete(groupIds, '服务“' + group.name + '”', true);
+    }
+
+    function clearBatchDeleteSelection() {
+      batchDeleteSelection.clear();
+      renderBatchDeleteList();
+    }
+
+    function toggleBatchDeleteSelectAll() {
+      const currentPageGroups = getBatchDeleteCurrentPageGroups();
+      const visibleIds = currentPageGroups.flatMap((group) => group.items.map((secret) => secret.id));
+      if (visibleIds.length === 0) {
+        return;
+      }
+
+      const allSelected = visibleIds.every((id) => batchDeleteSelection.has(id));
+
+      if (allSelected) {
+        visibleIds.forEach((id) => batchDeleteSelection.delete(id));
+      } else {
+        visibleIds.forEach((id) => batchDeleteSelection.add(id));
+      }
+
+      renderBatchDeleteList();
+    }
+
+    function updateBatchDeletePagination() {
+      const paginationElement = document.getElementById('batchDeletePagination');
+      const pageInfoElement = document.getElementById('batchDeletePageInfo');
+      const prevButton = document.getElementById('batchDeletePrevBtn');
+      const nextButton = document.getElementById('batchDeleteNextBtn');
+
+      const totalGroups = batchDeleteGroupedSecrets.length;
+      const totalPages = Math.max(1, Math.ceil(totalGroups / batchDeletePageSize));
+
+      if (paginationElement) {
+        paginationElement.style.display = totalGroups > 0 ? 'flex' : 'none';
+      }
+
+      if (pageInfoElement) {
+        pageInfoElement.textContent = '第 ' + batchDeleteCurrentPage + ' / ' + totalPages + ' 页';
+      }
+
+      if (prevButton) {
+        prevButton.disabled = batchDeleteCurrentPage <= 1;
+      }
+
+      if (nextButton) {
+        nextButton.disabled = batchDeleteCurrentPage >= totalPages;
+      }
+    }
+
+    function updateBatchDeleteSummary() {
+      const summaryElement = document.getElementById('batchDeleteSummary');
+      const confirmButton = document.getElementById('batchDeleteConfirmBtn');
+      const selectAllButton = document.getElementById('batchDeleteSelectAllBtn');
+
+      const selectedCount = batchDeleteSelection.size;
+      const totalCount = secrets.length;
+      const totalGroups = batchDeleteGroupedSecrets.length;
+      const currentPageGroups = getBatchDeleteCurrentPageGroups();
+      const currentPageIds = currentPageGroups.flatMap((group) => group.items.map((secret) => secret.id));
+      const allCurrentPageSelected = currentPageIds.length > 0 && currentPageIds.every((id) => batchDeleteSelection.has(id));
+      const totalPages = Math.max(1, Math.ceil(totalGroups / batchDeletePageSize));
+
+      if (summaryElement) {
+        summaryElement.textContent =
+          '已选择 ' +
+          selectedCount +
+          ' / ' +
+          totalCount +
+          ' 个密钥 · ' +
+          totalGroups +
+          ' 个服务分组 · 第 ' +
+          batchDeleteCurrentPage +
+          '/' +
+          totalPages +
+          ' 页';
+      }
+
+      if (confirmButton) {
+        confirmButton.disabled = selectedCount === 0;
+      }
+
+      if (selectAllButton) {
+        selectAllButton.textContent = allCurrentPageSelected ? '取消本页全选' : '本页全选';
+      }
+    }
+
+    function renderBatchDeleteList() {
+      const listElement = document.getElementById('batchDeleteList');
+      if (!listElement) return;
+
+      if (!batchDeleteGroupedSecrets || batchDeleteGroupedSecrets.length === 0) {
+        listElement.innerHTML = '<div class="batch-delete-empty">未找到可删除的密钥</div>';
+        updateBatchDeleteSummary();
+        updateBatchDeletePagination();
+        return;
+      }
+
+      const currentPageGroups = getBatchDeleteCurrentPageGroups();
+      const pageStartIndex = (batchDeleteCurrentPage - 1) * batchDeletePageSize;
+
+      listElement.innerHTML = currentPageGroups
+        .map((group, groupIndex) => {
+          const groupIds = group.items.map((secret) => secret.id);
+          const selectedInGroup = groupIds.filter((id) => batchDeleteSelection.has(id)).length;
+          const groupChecked = selectedInGroup > 0 && selectedInGroup === group.items.length;
+          const groupPartial = selectedInGroup > 0 && selectedInGroup < group.items.length;
+          const encodedGroupKey = encodeURIComponent(group.key);
+          const groupCheckboxId = 'batch-group-' + (pageStartIndex + groupIndex);
+
+          const itemHtml = group.items
+            .map((secret) => {
+              const checked = batchDeleteSelection.has(secret.id) ? 'checked' : '';
+              const accountName = (secret.account || '').trim();
+              const accountText = accountName || '（无账户信息）';
+
+              return (
+                '<div class="batch-delete-item" onclick="toggleBatchDeleteSelection(&quot;' +
+                secret.id +
+                '&quot;)">' +
+                '<input type="checkbox" ' +
+                checked +
+                ' onclick="event.stopPropagation(); toggleBatchDeleteSelection(&quot;' +
+                secret.id +
+                '&quot;);">' +
+                '<div class="batch-delete-item-info">' +
+                '<div class="batch-delete-item-name' +
+                (accountName ? '' : ' batch-delete-item-name-placeholder') +
+                '">' +
+                escapeHTML(accountText) +
+                '</div>' +
+                '<div class="batch-delete-item-id">' +
+                escapeHTML(secret.id) +
+                '</div>' +
+                '</div>' +
+                '</div>'
+              );
+            })
+            .join('');
+
+          return (
+            '<div class="batch-delete-group">' +
+            '<div class="batch-delete-group-header">' +
+            '<div class="batch-delete-group-title">' +
+            '<input id="' +
+            groupCheckboxId +
+            '" type="checkbox" ' +
+            (groupChecked ? 'checked ' : '') +
+            (groupPartial ? 'data-indeterminate="true" ' : '') +
+            'onclick="event.stopPropagation(); toggleBatchDeleteGroupSelection(&quot;' +
+            encodedGroupKey +
+            '&quot;);">' +
+            '<label for="' +
+            groupCheckboxId +
+            '" class="batch-delete-group-name">' +
+            buildServiceIconMarkup(group.name, group.logoUrl, 'batch-delete-group-icon') +
+            '<span>' +
+            escapeHTML(group.name) +
+            '</span>' +
+            '</label>' +
+            '<span class="batch-delete-group-count">(' +
+            group.items.length +
+            ' 个)</span>' +
+            '</div>' +
+            '<div class="batch-delete-group-actions">' +
+            '<button type="button" class="btn btn-outline batch-delete-group-btn" onclick="event.stopPropagation(); selectOnlyBatchDeleteGroup(&quot;' +
+            encodedGroupKey +
+            '&quot;)">仅选本组</button>' +
+            '<button type="button" class="btn btn-outline batch-delete-group-btn batch-delete-group-delete-btn" onclick="event.stopPropagation(); deleteBatchDeleteGroup(&quot;' +
+            encodedGroupKey +
+            '&quot;)">删除本组</button>' +
+            '</div>' +
+            '</div>' +
+            '<div class="batch-delete-group-items">' +
+            itemHtml +
+            '</div>' +
+            '</div>'
+          );
+        })
+        .join('');
+
+      listElement.querySelectorAll('input[data-indeterminate="true"]').forEach((checkbox) => {
+        checkbox.indeterminate = true;
+      });
+
+      updateBatchDeleteSummary();
+      updateBatchDeletePagination();
+    }
+
+    async function executeBatchDelete(customIds = null, customLabel = '', keepModalOpen = false) {
+      const ids = Array.isArray(customIds) ? Array.from(new Set(customIds.filter(Boolean))) : Array.from(batchDeleteSelection);
+
+      if (ids.length === 0) {
+        showCenterToast('ℹ️', '请先选择要删除的密钥');
+        return;
+      }
+
+      const deleteTargetText = customLabel ? customLabel + '（共 ' + ids.length + ' 个密钥）' : '选中的 ' + ids.length + ' 个密钥';
+      if (!confirm('确定要删除' + deleteTargetText + '吗？\\n\\n⚠️ 删除后无法恢复。')) {
+        return;
+      }
+
+      const confirmButton = document.getElementById('batchDeleteConfirmBtn');
+      const originalText = confirmButton ? confirmButton.textContent : '删除所选';
+      if (confirmButton) {
+        confirmButton.textContent = '删除中...';
+        confirmButton.disabled = true;
+      }
+
+      saveQueue = saveQueue
+        .then(async () => {
+          try {
+            const response = await authenticatedFetch('/api/secrets/batch', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids }),
+            });
+
+            const result = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+              const errorMessage = result.message || result.error || '批量删除失败，请重试';
+              showCenterToast('❌', errorMessage);
+              return;
+            }
+
+            const deletedIds = Array.isArray(result.deletedIds) ? result.deletedIds : [];
+            const deletedSet = new Set(deletedIds);
+
+            if (deletedIds.length > 0) {
+              deletedIds.forEach((id) => batchDeleteSelection.delete(id));
+
+              secrets = secrets.filter((secret) => !deletedSet.has(secret.id));
+              deletedIds.forEach((id) => {
+                if (otpIntervals[id]) {
+                  clearInterval(otpIntervals[id]);
+                  delete otpIntervals[id];
+                }
+              });
+              statsCache = null;
+              await renderSecrets();
+            }
+
+            const successCount = typeof result.successCount === 'number' ? result.successCount : deletedIds.length;
+            const failCount = typeof result.failCount === 'number' ? result.failCount : Math.max(0, ids.length - successCount);
+
+            showCenterToast('✅', '批量删除完成：成功 ' + successCount + ' 个，失败 ' + failCount + ' 个');
+
+            if (keepModalOpen) {
+              const keyword = document.getElementById('batchDeleteSearchInput')?.value || '';
+              filterBatchDeleteList(keyword);
+            } else {
+              hideBatchDeleteModal();
+            }
+
+            if (document.getElementById('statsModal')?.classList.contains('show')) {
+              refreshStatsData();
+            }
+          } catch (error) {
+            console.error('批量删除失败:', error);
+            showCenterToast('❌', '批量删除失败：' + error.message);
+          } finally {
+            if (confirmButton) {
+              confirmButton.textContent = originalText;
+              confirmButton.disabled = batchDeleteSelection.size === 0;
+            }
+            updateBatchDeleteSummary();
+          }
+        })
+        .catch((err) => {
+          console.error('❌ [保存队列] 批量删除队列执行错误:', err);
+          if (confirmButton) {
+            confirmButton.textContent = originalText;
+            confirmButton.disabled = false;
+          }
+        });
+    }
+
+    // ========== 数据统计 ==========
+
+    function showStatsModal() {
+      showModal('statsModal');
+
+      const updatedAtElement = document.getElementById('statsUpdatedAt');
+      if (updatedAtElement) {
+        updatedAtElement.textContent = '正在加载统计数据...';
+      }
+
+      refreshStatsData();
+    }
+
+    function hideStatsModal() {
+      hideModal('statsModal');
+    }
+
+    async function refreshStatsData() {
+      try {
+        const response = await authenticatedFetch('/api/secrets/stats');
+
+        if (response.status === 401) {
+          handleUnauthorized();
+          return;
+        }
+
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.message || result.error || '获取统计数据失败');
+        }
+
+        const stats = result.data || {};
+        statsCache = stats;
+        renderStatsData(stats, result.generatedAt, false);
+      } catch (error) {
+        console.warn('获取服务端统计失败，回退到本地统计:', error);
+        const localStats = calculateLocalStats(secrets);
+        statsCache = localStats;
+        renderStatsData(localStats, new Date().toISOString(), true);
+      }
+    }
+
+    function calculateLocalStats(secretList) {
+      const list = Array.isArray(secretList) ? secretList : [];
+
+      const typeDistribution = { TOTP: 0, HOTP: 0, UNKNOWN: 0 };
+      const algorithmDistribution = { SHA1: 0, SHA256: 0, SHA512: 0, UNKNOWN: 0 };
+      const digitsDistribution = { '6': 0, '8': 0, other: 0 };
+      const periodDistribution = { '30': 0, '60': 0, '120': 0, other: 0 };
+
+      let withAccount = 0;
+      let withoutAccount = 0;
+      let strongSecrets = 0;
+      let weakSecrets = 0;
+      let invalidSecrets = 0;
+
+      const serviceCounter = new Map();
+
+      list.forEach(secret => {
+        const type = (secret.type || 'TOTP').toUpperCase();
+        if (type === 'TOTP' || type === 'HOTP') {
+          typeDistribution[type]++;
+        } else {
+          typeDistribution.UNKNOWN++;
+        }
+
+        const algorithm = (secret.algorithm || 'SHA1').toUpperCase();
+        if (algorithmDistribution[algorithm] !== undefined) {
+          algorithmDistribution[algorithm]++;
+        } else {
+          algorithmDistribution.UNKNOWN++;
+        }
+
+        const digits = Number(secret.digits || 6);
+        if (digits === 6 || digits === 8) {
+          digitsDistribution[String(digits)]++;
+        } else {
+          digitsDistribution.other++;
+        }
+
+        if (type === 'TOTP') {
+          const period = Number(secret.period || 30);
+          if (period === 30 || period === 60 || period === 120) {
+            periodDistribution[String(period)]++;
+          } else {
+            periodDistribution.other++;
+          }
+        }
+
+        if (secret.account && secret.account.trim()) {
+          withAccount++;
+        } else {
+          withoutAccount++;
+        }
+
+        const serviceName = (secret.name || '未命名服务').trim() || '未命名服务';
+        serviceCounter.set(serviceName, (serviceCounter.get(serviceName) || 0) + 1);
+
+        const normalizedSecret = (secret.secret || '').toUpperCase().replace(/\\s/g, '');
+        if (!validateBase32(normalizedSecret)) {
+          invalidSecrets++;
+          return;
+        }
+
+        const noPadding = normalizedSecret.replace(/=+$/, '');
+        const bitLength = Math.floor((noPadding.length * 5) / 8) * 8;
+        if (bitLength < 128) {
+          weakSecrets++;
+        } else {
+          strongSecrets++;
+        }
+      });
+
+      const topServices = Array.from(serviceCounter.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => {
+          if (b.count !== a.count) {
+            return b.count - a.count;
+          }
+          return a.name.localeCompare(b.name, 'zh-CN');
+        })
+        .slice(0, 10);
+
+      return {
+        overview: {
+          totalSecrets: list.length,
+          uniqueServices: serviceCounter.size,
+          withAccount,
+          withoutAccount
+        },
+        typeDistribution,
+        algorithmDistribution,
+        digitsDistribution,
+        periodDistribution,
+        security: {
+          strongSecrets,
+          weakSecrets,
+          invalidSecrets
+        },
+        topServices
+      };
+    }
+
+    function renderStatsData(stats, generatedAt, isLocalFallback) {
+      const updatedAtElement = document.getElementById('statsUpdatedAt');
+      if (updatedAtElement) {
+        let timeText = '';
+        if (generatedAt) {
+          const date = new Date(generatedAt);
+          if (!Number.isNaN(date.getTime())) {
+            timeText = date.toLocaleString('zh-CN');
+          }
+        }
+
+        updatedAtElement.textContent = (timeText ? '更新时间：' + timeText : '更新时间：刚刚') + (isLocalFallback ? '（本地计算）' : '（服务端统计）');
+      }
+
+      renderStatsOverview(stats);
+
+      const typeData = stats.typeDistribution || {};
+      renderStatsKV('statsTypeGrid', [
+        { key: 'TOTP', value: typeData.TOTP || 0 },
+        { key: 'HOTP', value: typeData.HOTP || 0 },
+        { key: '未知类型', value: typeData.UNKNOWN || 0 }
+      ]);
+
+      const algorithmData = stats.algorithmDistribution || {};
+      renderStatsKV('statsAlgorithmGrid', [
+        { key: 'SHA1', value: algorithmData.SHA1 || 0 },
+        { key: 'SHA256', value: algorithmData.SHA256 || 0 },
+        { key: 'SHA512', value: algorithmData.SHA512 || 0 },
+        { key: '其他算法', value: algorithmData.UNKNOWN || 0 }
+      ]);
+
+      const digitsData = stats.digitsDistribution || {};
+      renderStatsKV('statsDigitsGrid', [
+        { key: '6 位', value: digitsData['6'] || 0 },
+        { key: '8 位', value: digitsData['8'] || 0 },
+        { key: '其他位数', value: digitsData.other || 0 }
+      ]);
+
+      const periodData = stats.periodDistribution || {};
+      renderStatsKV('statsPeriodGrid', [
+        { key: '30 秒', value: periodData['30'] || 0 },
+        { key: '60 秒', value: periodData['60'] || 0 },
+        { key: '120 秒', value: periodData['120'] || 0 },
+        { key: '其他周期', value: periodData.other || 0 }
+      ]);
+
+      const securityData = stats.security || {};
+      renderStatsKV('statsSecurityGrid', [
+        { key: '强密钥', value: securityData.strongSecrets || 0 },
+        { key: '弱密钥', value: securityData.weakSecrets || 0 },
+        { key: '无效密钥', value: securityData.invalidSecrets || 0 }
+      ]);
+
+      renderTopServices(stats.topServices || []);
+    }
+
+    function renderStatsOverview(stats) {
+      const grid = document.getElementById('statsOverviewGrid');
+      if (!grid) return;
+
+      const overview = stats.overview || {};
+      const security = stats.security || {};
+
+      const cards = [
+        { label: '密钥总数', value: overview.totalSecrets || 0 },
+        { label: '唯一服务', value: overview.uniqueServices || 0 },
+        { label: '有账户信息', value: overview.withAccount || 0 },
+        { label: '弱密钥占比', value: (overview.totalSecrets > 0 ? Math.round(((security.weakSecrets || 0) / overview.totalSecrets) * 100) : 0) + '%' }
+      ];
+
+      grid.innerHTML = cards.map(card => {
+        return '<div class="stats-overview-card">' +
+          '<div class="stats-overview-label">' + escapeHTML(card.label) + '</div>' +
+          '<div class="stats-overview-value">' + escapeHTML(String(card.value)) + '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function renderStatsKV(containerId, items) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      if (!Array.isArray(items) || items.length === 0) {
+        container.innerHTML = '<div class="stats-empty">暂无统计数据</div>';
+        return;
+      }
+
+      container.innerHTML = items.map(item => {
+        return '<div class="stats-kv-item">' +
+          '<span class="stats-kv-key">' + escapeHTML(String(item.key)) + '</span>' +
+          '<span class="stats-kv-value">' + escapeHTML(String(item.value)) + '</span>' +
+        '</div>';
+      }).join('');
+    }
+
+    function renderTopServices(topServices) {
+      const container = document.getElementById('statsTopServices');
+      if (!container) return;
+
+      if (!Array.isArray(topServices) || topServices.length === 0) {
+        container.innerHTML = '<div class="stats-empty">暂无服务数据</div>';
+        return;
+      }
+
+      container.innerHTML = topServices.map((item, index) => {
+        return '<div class="stats-service-row">' +
+          '<span class="stats-service-name">' + (index + 1) + '. ' + escapeHTML(item.name || '未命名服务') + '</span>' +
+          '<span class="stats-service-count">' + escapeHTML(String(item.count || 0)) + ' 个</span>' +
+        '</div>';
+      }).join('');
     }
     
     // 二维码解析工具
@@ -705,8 +1738,14 @@ export function getCoreCode() {
               secrets.push(result.data ? result.data.secret : result);
             }
 
+            statsCache = null;
+
             await renderSecrets();
             hideSecretModal();
+
+            if (document.getElementById('statsModal')?.classList.contains('show')) {
+              refreshStatsData();
+            }
           } else {
             const error = await response.json();
             const errorMessage = error.message || error.error || '保存失败，请重试';
@@ -735,6 +1774,8 @@ export function getCoreCode() {
         hideQRModal();
         hideQRScanner();
         hideImportModal();
+        hideBatchDeleteModal();
+        hideStatsModal();
       }
       
       if (e.ctrlKey && e.key === 'd') {
@@ -808,6 +1849,18 @@ export function getCoreCode() {
     document.getElementById('importModal').addEventListener('click', function(e) {
       if (e.target === this) {
         hideImportModal();
+      }
+    });
+
+    document.getElementById('batchDeleteModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        hideBatchDeleteModal();
+      }
+    });
+
+    document.getElementById('statsModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        hideStatsModal();
       }
     });
 

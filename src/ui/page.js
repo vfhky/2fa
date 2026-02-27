@@ -150,6 +150,18 @@ function getHTMLBody() {
       </div>
           </div>
           <div class="search-stats" id="searchStats" style="display: none;"></div>
+          <div class="main-list-toolbar" id="mainListToolbar" style="display: none;">
+            <div class="main-list-summary" id="mainListSummary">共 0 个密钥</div>
+            <label class="main-list-page-size-label">
+              每页
+              <select id="mainListPageSizeSelect" onchange="changeSecretsPageSize(this.value)">
+                <option value="4">4 组</option>
+                <option value="6" selected>6 组</option>
+                <option value="10">10 组</option>
+                <option value="20">20 组</option>
+              </select>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -162,6 +174,12 @@ function getHTMLBody() {
       
       <div id="secretsList" class="secrets-list" style="display: none;">
         <!-- 密钥列表将在这里动态生成 -->
+      </div>
+
+      <div class="secrets-pagination" id="secretsPagination" style="display: none;">
+        <button type="button" class="btn btn-outline" id="secretsPrevBtn" onclick="changeSecretsPage(-1)">上一页</button>
+        <div class="secrets-page-info" id="secretsPageInfo">第 1 / 1 页</div>
+        <button type="button" class="btn btn-outline" id="secretsNextBtn" onclick="changeSecretsPage(1)">下一页</button>
       </div>
       
       <div id="emptyState" class="empty-state" style="display: none;">
@@ -1124,6 +1142,91 @@ function getHTMLBody() {
     </div>
   </div>
 
+  <!-- 批量删除模态框 -->
+  <div id="batchDeleteModal" class="modal">
+    <div class="modal-content" style="max-width: 640px;">
+      <div class="modal-header">
+        <h2>🗑️ 批量删除密钥</h2>
+        <button class="close-btn" onclick="hideBatchDeleteModal()">&times;</button>
+      </div>
+
+      <div class="batch-delete-toolbar">
+        <div class="batch-delete-summary" id="batchDeleteSummary">已选择 0 / 0</div>
+        <div class="batch-delete-controls">
+          <label class="batch-delete-page-size-label">
+            每页
+            <select id="batchDeletePageSizeSelect" onchange="changeBatchDeletePageSize(this.value)">
+              <option value="4">4 组</option>
+              <option value="6" selected>6 组</option>
+              <option value="10">10 组</option>
+              <option value="20">20 组</option>
+            </select>
+          </label>
+          <button type="button" class="btn btn-outline" onclick="toggleBatchDeleteSelectAll()" id="batchDeleteSelectAllBtn">本页全选</button>
+          <button type="button" class="btn btn-outline" onclick="clearBatchDeleteSelection()">清空</button>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top: 16px; margin-bottom: 16px;">
+        <input type="search" id="batchDeleteSearchInput" placeholder="按服务名或账户搜索（支持按服务分组删除）" oninput="filterBatchDeleteList(this.value)">
+      </div>
+
+      <div id="batchDeleteList" class="batch-delete-list"></div>
+
+      <div class="batch-delete-pagination" id="batchDeletePagination">
+        <button type="button" class="btn btn-outline" id="batchDeletePrevBtn" onclick="changeBatchDeletePage(-1)">上一页</button>
+        <div class="batch-delete-page-info" id="batchDeletePageInfo">第 1 / 1 页</div>
+        <button type="button" class="btn btn-outline" id="batchDeleteNextBtn" onclick="changeBatchDeletePage(1)">下一页</button>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="hideBatchDeleteModal()">取消</button>
+        <button type="button" class="btn btn-danger" id="batchDeleteConfirmBtn" onclick="executeBatchDelete()" disabled>删除所选</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数据统计模态框 -->
+  <div id="statsModal" class="modal">
+    <div class="modal-content" style="max-width: 720px;">
+      <div class="modal-header">
+        <h2>📊 数据统计</h2>
+        <button class="close-btn" onclick="hideStatsModal()">&times;</button>
+      </div>
+
+      <div class="stats-updated-at" id="statsUpdatedAt">正在加载统计数据...</div>
+
+      <div class="stats-overview-grid" id="statsOverviewGrid"></div>
+
+      <div class="stats-section">
+        <h3>类型分布</h3>
+        <div class="stats-kv-grid" id="statsTypeGrid"></div>
+      </div>
+
+      <div class="stats-section">
+        <h3>算法与位数</h3>
+        <div class="stats-kv-grid" id="statsAlgorithmGrid"></div>
+        <div class="stats-kv-grid" id="statsDigitsGrid" style="margin-top: 10px;"></div>
+      </div>
+
+      <div class="stats-section">
+        <h3>周期与安全性</h3>
+        <div class="stats-kv-grid" id="statsPeriodGrid"></div>
+        <div class="stats-kv-grid" id="statsSecurityGrid" style="margin-top: 10px;"></div>
+      </div>
+
+      <div class="stats-section">
+        <h3>高频服务（Top 10）</h3>
+        <div id="statsTopServices" class="stats-top-services"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-outline" onclick="refreshStatsData()">刷新统计</button>
+        <button type="button" class="btn btn-secondary" onclick="hideStatsModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 页面底部链接 -->
   <footer class="page-footer">
     <div class="footer-content">
@@ -1172,6 +1275,14 @@ function getHTMLBody() {
       <div class="submenu-item" onclick="exportAllSecrets(); closeActionMenu();">
         <span class="item-icon">📤</span>
         <span class="item-text">批量导出</span>
+      </div>
+      <div class="submenu-item submenu-item-danger" onclick="showBatchDeleteModal(); closeActionMenu();">
+        <span class="item-icon">🗑️</span>
+        <span class="item-text">批量删除</span>
+      </div>
+      <div class="submenu-item" onclick="showStatsModal(); closeActionMenu();">
+        <span class="item-icon">📊</span>
+        <span class="item-text">数据统计</span>
       </div>
       <div class="submenu-item" onclick="showRestoreModal(); closeActionMenu();">
         <span class="item-icon">🔄</span>

@@ -20,7 +20,16 @@ export function getStateCode() {
     let debugMode = false;
     let currentSearchQuery = '';
     let filteredSecrets = [];
+    let secretsGroupedList = []; // 首页按服务分组后的列表
+    let secretsCurrentPage = 1; // 首页当前页（按服务分组分页）
+    let secretsPageSize = 6; // 首页每页分组数
     let saveQueue = Promise.resolve(); // 保存操作队列，确保串行执行避免并发覆盖
+    let batchDeleteSelection = new Set(); // 批量删除选中ID集合
+    let batchDeleteFilteredSecrets = []; // 批量删除过滤后的列表
+    let batchDeleteGroupedSecrets = []; // 批量删除按服务分组后的列表
+    let batchDeleteCurrentPage = 1; // 批量删除当前页
+    let batchDeletePageSize = 6; // 批量删除每页分组数
+    let statsCache = null; // 统计数据缓存
     // authToken 已移除 - 现在使用 HttpOnly Cookie
 
 `;

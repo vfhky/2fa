@@ -54,12 +54,12 @@ export function getBackupCode() {
         // 渲染备份下拉选择框
         renderBackupSelect(backupList);
         backupSelectElement.disabled = false;
-      } catch (error) {
-        console.error('加载备份列表失败:', error);
-        backupSelectElement.innerHTML = '<option value="">加载备份列表失败: ' + error.message + '</option>';
-        backupSelectElement.disabled = true;
-      }
-    }
+	      } catch (error) {
+	        console.error('加载备份列表失败:', error);
+	        backupSelectElement.innerHTML = '<option value="">加载备份列表失败: ' + escapeHTML(error.message || '未知错误') + '</option>';
+	        backupSelectElement.disabled = true;
+	      }
+	    }
 
     function renderBackupSelect(backups) {
       const backupSelectElement = document.getElementById('backupSelect');
@@ -117,9 +117,9 @@ export function getBackupCode() {
       await showBackupPreview(backup);
     }
 
-    async function showBackupPreview(backup) {
-      const previewElement = document.getElementById('restorePreview');
-      const previewContent = document.getElementById('backupPreviewContent');
+	    async function showBackupPreview(backup) {
+	      const previewElement = document.getElementById('restorePreview');
+	      const previewContent = document.getElementById('backupPreviewContent');
 
       previewElement.style.display = 'block';
       previewContent.innerHTML = '<div class="loading-backup">正在加载备份内容...</div>';
@@ -140,38 +140,38 @@ export function getBackupCode() {
         const responseData = await response.json();
         const data = responseData.data || responseData; // 兼容不同的响应格式
 
-        if (data.secrets && data.secrets.length > 0) {
-          previewContent.innerHTML =
-            '<div class="backup-table-container">' +
-              '<table class="backup-table">' +
+	        if (data.secrets && data.secrets.length > 0) {
+	          previewContent.innerHTML =
+	            '<div class="backup-table-container">' +
+	              '<table class="backup-table">' +
                 '<thead>' +
                   '<tr>' +
-                    '<th>🔐 服务名称</th>' +
-                    '<th>👤 账户信息</th>' +
-                    '<th>🔢 类型</th>' +
-                    '<th>⏱️ 创建时间</th>' +
+                    '<th>服务</th>' +
+                    '<th>账户</th>' +
+                    '<th>类型</th>' +
+                    '<th>创建时间</th>' +
                   '</tr>' +
                 '</thead>' +
-                '<tbody>' +
-                  data.secrets.map(secret =>
-                    '<tr class="backup-table-row">' +
-                      '<td class="service-name">' + secret.name + '</td>' +
-                      '<td class="account-info">' + (secret.account || secret.service || '无账户信息') + '</td>' +
-                      '<td class="secret-type">' + (secret.type || 'TOTP') + '</td>' +
-                      '<td class="created-time">' + (secret.createdAt ? new Date(secret.createdAt).toLocaleString('zh-CN') : '未知') + '</td>' +
-                    '</tr>'
-                  ).join('') +
-                '</tbody>' +
-              '</table>' +
-            '</div>';
-        } else {
-          previewContent.innerHTML = '<div class="no-backups">此备份中没有密钥</div>';
-        }
-      } catch (error) {
-        console.error('加载备份预览失败:', error);
-        previewContent.innerHTML = '<div class="no-backups">加载备份预览失败: ' + error.message + '</div>';
-      }
-    }
+	                '<tbody>' +
+	                  data.secrets.map(secret =>
+	                    '<tr class="backup-table-row">' +
+	                      '<td class="backup-service-name">' + escapeHTML(secret.name || '未命名服务') + '</td>' +
+	                      '<td class="backup-account-info">' + escapeHTML(secret.account || secret.service || '未设置账户') + '</td>' +
+	                      '<td class="backup-secret-type">' + escapeHTML(((secret.type || 'TOTP') + '').toUpperCase()) + '</td>' +
+	                      '<td class="backup-created-time">' + escapeHTML(secret.createdAt ? new Date(secret.createdAt).toLocaleString('zh-CN') : '未知') + '</td>' +
+	                    '</tr>'
+	                  ).join('') +
+	                '</tbody>' +
+	              '</table>' +
+	            '</div>';
+	        } else {
+	          previewContent.innerHTML = '<div class="no-backups">此备份中没有密钥</div>';
+	        }
+	      } catch (error) {
+	        console.error('加载备份预览失败:', error);
+	        previewContent.innerHTML = '<div class="no-backups">加载备份预览失败: ' + escapeHTML(error.message || '未知错误') + '</div>';
+	      }
+	    }
 
     async function confirmRestore() {
       if (!selectedBackup) {

@@ -31,6 +31,36 @@ export function getPreviewImportCode() {
       let invalidCount = 0;
       let skippedCount = 0;
 
+      function getPreviewStatusText(status) {
+        if (status === 'valid') return '有效';
+        if (status === 'invalid') return '无效';
+        if (status === 'skipped') return '跳过';
+        if (status === 'encrypted') return '加密';
+        return '信息';
+      }
+
+      function buildPreviewItemContent(status, title, subtitle, subtitleClass = 'account-name') {
+        const titleText = title || '未命名服务';
+        const subtitleText = subtitle || '';
+        const subtitleHtml = subtitleText
+          ? '<div class="' + subtitleClass + '">' + escapeHTML(subtitleText) + '</div>'
+          : '';
+
+        return (
+          '<div class="import-preview-main">' +
+          '<span class="import-preview-status status-' +
+          status +
+          '">' +
+          getPreviewStatusText(status) +
+          '</span>' +
+          '<div class="service-name">' +
+          escapeHTML(titleText) +
+          '</div>' +
+          '</div>' +
+          subtitleHtml
+        );
+      }
+
       // 检测 FreeOTP 加密备份格式
       const freeotpData = parseFreeOTPBackup(text);
       if (freeotpData) {
@@ -47,9 +77,11 @@ export function getPreviewImportCode() {
           if (meta.type && meta.type !== 'TOTP') displayInfo += ' [' + meta.type + ']';
           if (meta.digits && meta.digits !== 6) displayInfo += ' [' + meta.digits + '位]';
 
-          item.innerHTML =
-            '<div class="service-name">🔒 ' + displayInfo + '</div>' +
-            '<div class="account-name">' + (account || '(需要密码解密)') + '</div>';
+          item.innerHTML = buildPreviewItemContent(
+            'encrypted',
+            displayInfo,
+            account || '需要密码解密'
+          );
 
           previewList.appendChild(item);
 
@@ -64,21 +96,21 @@ export function getPreviewImportCode() {
         });
 
         const statsDiv = document.createElement('div');
-        statsDiv.style.cssText = 'margin: 15px 0; padding: 15px; background: var(--bg-secondary); border-radius: 6px; font-size: 14px; color: var(--text-primary);';
+        statsDiv.className = 'import-stats-header';
         statsDiv.innerHTML =
-          '<strong>🔐 FreeOTP 加密备份</strong><br>' +
-          '<span style="color: var(--text-secondary);">检测到 ' + tokenCount + ' 个加密密钥</span><br><br>' +
-          '<div style="display: flex; gap: 10px; align-items: center;">' +
+          '<strong>FreeOTP 加密备份</strong><br>' +
+          '<span class="import-stats-header-desc">检测到 ' + tokenCount + ' 个加密密钥</span>' +
+          '<div class="import-stats-header-action" id="freeotpPasswordSection">' +
           '<input type="password" id="freeotpPassword" placeholder="输入备份密码" ' +
-          'style="flex: 1; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">' +
-          '<button onclick="decryptAndPreviewFreeOTP()" class="btn btn-primary" style="padding: 8px 16px;">解密</button>' +
+          'class="import-password-input">' +
+          '<button onclick="decryptAndPreviewFreeOTP()" class="btn btn-primary">解密</button>' +
           '</div>';
 
         previewList.insertBefore(statsDiv, previewList.firstChild);
         updateImportStats(validCount, 0, 0);
         previewDiv.style.display = 'block';
         executeBtn.disabled = true;
-        executeBtn.textContent = '🔒 需要先解密';
+        executeBtn.textContent = '需要先解密';
         return;
       }
 
@@ -89,18 +121,18 @@ export function getPreviewImportCode() {
         const statsDiv = document.createElement('div');
         statsDiv.className = 'import-stats-header';
         statsDiv.innerHTML =
-          '<strong>🔐 TOTP Authenticator 加密备份</strong><br>' +
-          '<span style="color: var(--text-secondary);">检测到加密的 TOTP Authenticator 备份</span><br><br>' +
-          '<div style="display: flex; gap: 10px; align-items: center;">' +
+          '<strong>TOTP Authenticator 加密备份</strong><br>' +
+          '<span class="import-stats-header-desc">检测到加密的 TOTP Authenticator 备份</span>' +
+          '<div class="import-stats-header-action" id="totpAuthPasswordSection">' +
           '<input type="password" id="totpAuthPassword" placeholder="输入备份密码" ' +
-          'style="flex: 1; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">' +
-          '<button onclick="decryptAndPreviewTOTPAuth()" class="btn btn-primary" style="padding: 8px 16px;">解密</button>' +
+          'class="import-password-input">' +
+          '<button onclick="decryptAndPreviewTOTPAuth()" class="btn btn-primary">解密</button>' +
           '</div>';
 
         previewList.appendChild(statsDiv);
         previewDiv.style.display = 'block';
         executeBtn.disabled = true;
-        executeBtn.textContent = '🔒 需要先解密';
+        executeBtn.textContent = '需要先解密';
         return;
       }
 
@@ -175,9 +207,11 @@ export function getPreviewImportCode() {
 
             if (isDeleted) {
               item.className += ' skipped';
-              item.innerHTML =
-                '<div class="service-name">⏭️ ' + (issuer || '未知服务') + '</div>' +
-                '<div class="account-name">已删除条目，跳过导入</div>';
+              item.innerHTML = buildPreviewItemContent(
+                'skipped',
+                issuer || '未知服务',
+                '已删除条目，已跳过'
+              );
               previewList.appendChild(item);
               skippedCount++;
               return;
@@ -209,9 +243,11 @@ export function getPreviewImportCode() {
                 if (period !== 30 && type === 'totp') displayInfo += ' [' + period + 's]';
                 if (algorithm !== 'SHA1') displayInfo += ' [' + algorithm + ']';
 
-                item.innerHTML =
-                  '<div class="service-name">✅ ' + displayInfo + '</div>' +
-                  '<div class="account-name">' + (account || '(无账户)') + '</div>';
+                item.innerHTML = buildPreviewItemContent(
+                  'valid',
+                  displayInfo,
+                  account || '未设置账户'
+                );
 
                 importPreviewData.push({
                   serviceName: serviceName,
@@ -238,9 +274,12 @@ export function getPreviewImportCode() {
           }
         } catch (error) {
           item.className += ' invalid';
-          item.innerHTML =
-            '<div class="service-name">❌ 第' + (index + 1) + '行</div>' +
-            '<div class="error-msg">' + error.message + '</div>';
+          item.innerHTML = buildPreviewItemContent(
+            'invalid',
+            '第' + (index + 1) + '行',
+            error.message,
+            'error-msg'
+          );
 
           importPreviewData.push({
             line: index + 1,

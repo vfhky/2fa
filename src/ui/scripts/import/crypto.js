@@ -175,7 +175,10 @@ export function getTOTPAuthDecryptCode() {
         document.getElementById('importText').value = otpauthUrls.join('\\n');
 
         // 隐藏密码输入区
-        document.getElementById('totpAuthPasswordSection').style.display = 'none';
+        const totpPasswordSection = document.getElementById('totpAuthPasswordSection');
+        if (totpPasswordSection) {
+          totpPasswordSection.style.display = 'none';
+        }
 
         // 触发预览
         previewImport();
@@ -303,7 +306,10 @@ export function getFreeOTPDecryptCode() {
         document.getElementById('importText').value = otpauthUrls.join('\\n');
 
         // 隐藏密码输入区
-        document.getElementById('freeotpPasswordSection').style.display = 'none';
+        const freeotpPasswordSection = document.getElementById('freeotpPasswordSection');
+        if (freeotpPasswordSection) {
+          freeotpPasswordSection.style.display = 'none';
+        }
 
         // 触发预览
         previewImport();

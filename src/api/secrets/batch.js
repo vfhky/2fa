@@ -3,12 +3,13 @@
  *
  * 包含功能:
  * - handleBatchAddSecrets: 批量导入密钥（带 Rate Limiting）
+ * - handleBatchDeleteSecrets: 批量删除密钥（带 Rate Limiting）
  */
 
 import { saveSecretsToKV } from './shared.js';
 import { decryptSecrets } from '../../utils/encryption.js';
 import { getLogger } from '../../utils/logger.js';
-import { validateRequest, batchImportSchema, addSecretSchema, checkDuplicateSecret } from '../../utils/validation.js';
+import { validateRequest, batchImportSchema, batchDeleteSchema, addSecretSchema, checkDuplicateSecret } from '../../utils/validation.js';
 import { createJsonResponse, createErrorResponse } from '../../utils/response.js';
 import { checkRateLimit, getClientIdentifier, createRateLimitResponse, RATE_LIMIT_PRESETS } from '../../utils/rateLimit.js';
 import { ValidationError, StorageError, CryptoError, errorToResponse, logError } from '../../utils/errors.js';
@@ -161,5 +162,141 @@ export async function handleBatchAddSecrets(request, env) {
 			error,
 		);
 		return createErrorResponse('批量导入失败', `批量导入密钥时发生内部错误：${error.message}`, 500, request);
+	}
+}
+
+/**
+ * 批量删除密钥 (带 Rate Limiting)
+ *
+ * 处理流程:
+ * 1. Rate limiting 检查（防止批量操作滥用）
+ * 2. 验证输入数据格式
+ * 3. 逐个检查密钥是否存在
+ * 4. 一次性删除所有存在的密钥
+ * 5. 返回详细的成功/失败统计
+ *
+ * @param {Request} request - HTTP 请求对象
+ * @param {Object} env - Cloudflare Workers 环境对象
+ * @returns {Response} 批量删除结果响应
+ */
+export async function handleBatchDeleteSecrets(request, env) {
+	const logger = getLogger(env);
+
+	try {
+		// 🛡️ Rate Limiting: 防止批量操作滥用
+		const clientIP = getClientIdentifier(request, 'ip');
+		const rateLimitInfo = await checkRateLimit(clientIP, env, RATE_LIMIT_PRESETS.bulk);
+
+		if (!rateLimitInfo.allowed) {
+			logger.warn('批量删除速率限制超出', {
+				clientIP,
+				limit: rateLimitInfo.limit,
+				resetAt: rateLimitInfo.resetAt,
+			});
+			return createRateLimitResponse(rateLimitInfo);
+		}
+
+		// 🔍 验证请求体
+		const data = await validateRequest(batchDeleteSchema)(request);
+		if (data instanceof Response) {
+			return data;
+		}
+
+		const { ids } = data;
+
+		// 从KV存储获取现有密钥列表（可能是加密的）
+		const existingSecretsData = await env.SECRETS_KV.get(KV_KEYS.SECRETS, 'text');
+		const existingSecrets = await decryptSecrets(existingSecretsData, env);
+		const secretMap = new Map(existingSecrets.map((secret) => [secret.id, secret]));
+
+		const results = [];
+		const seenIds = new Set();
+		const deletedIds = [];
+		let successCount = 0;
+		let failCount = 0;
+
+		for (let i = 0; i < ids.length; i++) {
+			const secretId = ids[i];
+
+			if (seenIds.has(secretId)) {
+				results.push({
+					index: i,
+					id: secretId,
+					success: false,
+					error: '重复的密钥 ID',
+				});
+				failCount++;
+				continue;
+			}
+
+			seenIds.add(secretId);
+			const matchedSecret = secretMap.get(secretId);
+
+			if (!matchedSecret) {
+				results.push({
+					index: i,
+					id: secretId,
+					success: false,
+					error: '密钥不存在',
+				});
+				failCount++;
+				continue;
+			}
+
+			deletedIds.push(secretId);
+			results.push({
+				index: i,
+				id: secretId,
+				success: true,
+				name: matchedSecret.name,
+				account: matchedSecret.account || '',
+			});
+			successCount++;
+		}
+
+		// 一次性保存删除后的密钥列表
+		if (deletedIds.length > 0) {
+			const deletedIdSet = new Set(deletedIds);
+			const remainingSecrets = existingSecrets.filter((secret) => !deletedIdSet.has(secret.id));
+
+			// 🔄 批量删除后强制立即备份
+			await saveSecretsToKV(env, remainingSecrets, 'batch-delete', { immediate: true });
+		}
+
+		logger.info('✅ 批量删除完成', {
+			successCount,
+			failCount,
+			totalCount: ids.length,
+		});
+
+		return createJsonResponse(
+			{
+				success: true,
+				message: `批量删除完成: 成功 ${successCount} 个, 失败 ${failCount} 个`,
+				successCount,
+				failCount,
+				totalCount: ids.length,
+				deletedIds,
+				results,
+			},
+			200,
+			request,
+		);
+	} catch (error) {
+		// 如果是已知的错误类型，记录并转换
+		if (error instanceof ValidationError || error instanceof StorageError || error instanceof CryptoError) {
+			logError(error, logger, { operation: 'handleBatchDeleteSecrets' });
+			return errorToResponse(error, request);
+		}
+
+		// 未知错误
+		logger.error(
+			'批量删除失败',
+			{
+				errorMessage: error.message,
+			},
+			error,
+		);
+		return createErrorResponse('批量删除失败', `批量删除密钥时发生内部错误：${error.message}`, 500, request);
 	}
 }

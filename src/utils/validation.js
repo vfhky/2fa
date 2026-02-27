@@ -245,6 +245,44 @@ export const batchImportSchema = new Schema({
 });
 
 /**
+ * 批量删除验证规则
+ */
+export const batchDeleteSchema = new Schema({
+	ids: {
+		required: true,
+		type: 'array',
+		message: '请提供要删除的密钥ID数组',
+		transform: (v) => v.map((id) => (typeof id === 'string' ? id.trim() : id)),
+		validator: (v) => {
+			if (!Array.isArray(v)) {
+				return '密钥 ID 必须是数组格式';
+			}
+			if (v.length === 0) {
+				return '密钥 ID 数组不能为空';
+			}
+			if (v.length > 200) {
+				return `批量删除数量过多（${v.length}个），单次最多支持200个`;
+			}
+
+			for (let i = 0; i < v.length; i++) {
+				const id = v[i];
+				if (typeof id !== 'string') {
+					return `第 ${i + 1} 个密钥ID必须是字符串`;
+				}
+				if (!id.trim()) {
+					return `第 ${i + 1} 个密钥ID不能为空`;
+				}
+				if (id.trim().length > 100) {
+					return `第 ${i + 1} 个密钥ID长度过长`;
+				}
+			}
+
+			return true;
+		},
+	},
+});
+
+/**
  * 备份恢复验证规则
  */
 export const restoreBackupSchema = new Schema({
