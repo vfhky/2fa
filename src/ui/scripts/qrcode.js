@@ -549,6 +549,29 @@ export function getQRCodeCode() {
       return newImageData;
     }
 
+    function extractRegionImageData(imageData, startX, startY, cropWidth, cropHeight) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const safeStartX = Math.max(0, Math.min(width - 1, Math.floor(startX)));
+      const safeStartY = Math.max(0, Math.min(height - 1, Math.floor(startY)));
+      const safeCropWidth = Math.max(1, Math.min(width - safeStartX, Math.floor(cropWidth)));
+      const safeCropHeight = Math.max(1, Math.min(height - safeStartY, Math.floor(cropHeight)));
+      const output = new Uint8ClampedArray(safeCropWidth * safeCropHeight * 4);
+
+      for (let y = 0; y < safeCropHeight; y++) {
+        for (let x = 0; x < safeCropWidth; x++) {
+          const srcIndex = ((safeStartY + y) * width + (safeStartX + x)) * 4;
+          const destIndex = (y * safeCropWidth + x) * 4;
+          output[destIndex] = imageData.data[srcIndex];
+          output[destIndex + 1] = imageData.data[srcIndex + 1];
+          output[destIndex + 2] = imageData.data[srcIndex + 2];
+          output[destIndex + 3] = imageData.data[srcIndex + 3];
+        }
+      }
+
+      return buildImageData(output, safeCropWidth, safeCropHeight);
+    }
+
     function extractCenterImageData(imageData, ratio = 0.72) {
       const width = imageData.width;
       const height = imageData.height;
@@ -559,22 +582,67 @@ export function getQRCodeCode() {
         return imageData;
       }
 
-      const startX = Math.floor((width - cropWidth) / 2);
-      const startY = Math.floor((height - cropHeight) / 2);
-      const output = new Uint8ClampedArray(cropWidth * cropHeight * 4);
+      return extractRegionImageData(
+        imageData,
+        Math.floor((width - cropWidth) / 2),
+        Math.floor((height - cropHeight) / 2),
+        cropWidth,
+        cropHeight
+      );
+    }
 
-      for (let y = 0; y < cropHeight; y++) {
-        for (let x = 0; x < cropWidth; x++) {
-          const srcIndex = ((startY + y) * width + (startX + x)) * 4;
-          const destIndex = (y * cropWidth + x) * 4;
-          output[destIndex] = imageData.data[srcIndex];
-          output[destIndex + 1] = imageData.data[srcIndex + 1];
-          output[destIndex + 2] = imageData.data[srcIndex + 2];
-          output[destIndex + 3] = imageData.data[srcIndex + 3];
-        }
+    function upscaleImageData(imageData, scale = 2, maxSide = 2200) {
+      if (!Number.isFinite(scale) || scale <= 1) {
+        return imageData;
       }
 
-      return buildImageData(output, cropWidth, cropHeight);
+      const width = imageData.width;
+      const height = imageData.height;
+      const targetWidth = Math.min(maxSide, Math.max(1, Math.floor(width * scale)));
+      const targetHeight = Math.min(maxSide, Math.max(1, Math.floor(height * scale)));
+
+      if (targetWidth === width && targetHeight === height) {
+        return imageData;
+      }
+
+      const sourceCanvas = document.createElement('canvas');
+      sourceCanvas.width = width;
+      sourceCanvas.height = height;
+      const sourceCtx = sourceCanvas.getContext('2d');
+      sourceCtx.putImageData(imageData, 0, 0);
+
+      const targetCanvas = document.createElement('canvas');
+      targetCanvas.width = targetWidth;
+      targetCanvas.height = targetHeight;
+      const targetCtx = targetCanvas.getContext('2d');
+      targetCtx.imageSmoothingEnabled = false;
+      targetCtx.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight);
+
+      return targetCtx.getImageData(0, 0, targetWidth, targetHeight);
+    }
+
+    function getAggressiveRegionCandidates(imageData) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const cropWidth = Math.max(96, Math.floor(width * 0.72));
+      const cropHeight = Math.max(96, Math.floor(height * 0.72));
+
+      if (cropWidth >= width || cropHeight >= height) {
+        return [imageData];
+      }
+
+      const startX = width - cropWidth;
+      const startY = height - cropHeight;
+      const midX = Math.floor(startX / 2);
+      const midY = Math.floor(startY / 2);
+
+      return [
+        extractRegionImageData(imageData, 0, 0, cropWidth, cropHeight),
+        extractRegionImageData(imageData, startX, 0, cropWidth, cropHeight),
+        extractRegionImageData(imageData, 0, startY, cropWidth, cropHeight),
+        extractRegionImageData(imageData, startX, startY, cropWidth, cropHeight),
+        extractRegionImageData(imageData, midX, midY, cropWidth, cropHeight)
+      ];
     }
 
     function downscaleImageData(imageData, maxSide = 960) {
@@ -698,6 +766,34 @@ export function getQRCodeCode() {
         const centerBinary = enhanceImageData(optimizedCenterImageData, 'binaryAdaptive');
         result = runJsQRAttempts(centerBinary, deepOptions);
         if (result) return result;
+
+        // 静态图片导入时启用更激进策略（高密度/偏位 Google 迁移码）
+        if (options.aggressive) {
+          const upscaled = upscaleImageData(imageData, 2, 2200);
+          if (upscaled !== imageData) {
+            result = runJsQRAttempts(upscaled, deepOptions);
+            if (result) return result;
+
+            const upscaledCenter = extractCenterImageData(upscaled, 0.8);
+            result = runJsQRAttempts(upscaledCenter, deepOptions);
+            if (result) return result;
+          }
+
+          const aggressiveCandidates = getAggressiveRegionCandidates(upscaled !== imageData ? upscaled : optimizedImageData);
+          for (let i = 0; i < aggressiveCandidates.length; i++) {
+            const candidate = aggressiveCandidates[i];
+            result = runJsQRAttempts(candidate, deepOptions);
+            if (result) return result;
+
+            const candidateContrast = enhanceImageData(candidate, 'contrastStrong');
+            result = runJsQRAttempts(candidateContrast, deepOptions);
+            if (result) return result;
+
+            const candidateBinary = enhanceImageData(candidate, 'binaryAdaptive');
+            result = runJsQRAttempts(candidateBinary, deepOptions);
+            if (result) return result;
+          }
+        }
 
         return null;
       } catch (error) {
@@ -858,7 +954,7 @@ export function getQRCodeCode() {
             ctx.drawImage(img, 0, 0);
 
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const qrCode = decodeQRCode(imageData, { deep: true });
+            const qrCode = decodeQRCode(imageData, { deep: true, aggressive: true });
 
             if (qrCode) {
               hideQRScanner();
@@ -955,7 +1051,7 @@ export function getQRCodeCode() {
 
               // 尝试解析二维码（增强模式）
               status.textContent = '正在解析二维码...';
-              const qrCode = decodeQRCode(imageData, { deep: true });
+              const qrCode = decodeQRCode(imageData, { deep: true, aggressive: true });
 
               if (qrCode) {
                 status.textContent = '二维码解析成功！';

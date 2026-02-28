@@ -241,10 +241,10 @@ export function getQRDecodeToolCode() {
       startDecodeCamera();
     }
 
-    function decodeQRCodeForTool(imageData, deepMode) {
+    function decodeQRCodeForTool(imageData, deepMode, aggressiveMode = false) {
       // 优先复用主二维码模块的增强解码能力
       if (typeof decodeQRCode === 'function') {
-        return decodeQRCode(imageData, { deep: deepMode });
+        return decodeQRCode(imageData, { deep: deepMode, aggressive: aggressiveMode });
       }
 
       // 回退：工具模块内最小可用策略
@@ -303,7 +303,7 @@ export function getQRDecodeToolCode() {
             const imageData = decodeContext.getImageData(0, 0, videoWidth, videoHeight);
             decodeFrameCounter++;
             const deepMode = decodeFrameCounter % DEEP_DECODE_INTERVAL === 0;
-            const qrCode = decodeQRCodeForTool(imageData, deepMode);
+            const qrCode = decodeQRCodeForTool(imageData, deepMode, false);
 
             if (qrCode) {
               console.log('二维码解析成功:', qrCode);
@@ -354,7 +354,7 @@ export function getQRDecodeToolCode() {
             ctx.drawImage(img, 0, 0);
 
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const qrCode = decodeQRCodeForTool(imageData, true);
+            const qrCode = decodeQRCodeForTool(imageData, true, true);
 
             if (qrCode) {
               processDecodeResult(qrCode);

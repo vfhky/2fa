@@ -23,6 +23,27 @@ export function getGoogleMigrationCode() {
      * 处理 Google Authenticator 迁移二维码
      * 格式: otpauth-migration://offline?data=<base64-encoded-protobuf>
      */
+    function normalizeMigrationBase64(rawData) {
+      let normalized = String(rawData || '').trim();
+
+      // URLSearchParams 在部分场景会把 + 变空格，先恢复
+      normalized = normalized.replace(/\\s+/g, '+');
+
+      // 兼容 URL-safe Base64
+      normalized = normalized.replace(/-/g, '+').replace(/_/g, '/');
+
+      const remainder = normalized.length % 4;
+      if (remainder === 2) {
+        normalized += '==';
+      } else if (remainder === 3) {
+        normalized += '=';
+      } else if (remainder === 1) {
+        throw new Error('迁移数据格式无效（Base64 长度异常）');
+      }
+
+      return normalized;
+    }
+
     function processGoogleMigration(qrCodeData) {
       try {
         console.log('检测到 Google Authenticator 迁移格式');
@@ -36,8 +57,15 @@ export function getGoogleMigrationCode() {
           return;
         }
 
-        // URL 解码然后 Base64 解码
-        const base64Data = decodeURIComponent(dataParam);
+        // 兼容标准 Base64 / URL-safe Base64 / + 变空格等情况
+        let decodedDataParam = dataParam;
+        try {
+          decodedDataParam = decodeURIComponent(dataParam);
+        } catch (decodeError) {
+          // URLSearchParams 在多数浏览器中已解码，这里保持兼容回退
+          decodedDataParam = dataParam;
+        }
+        const base64Data = normalizeMigrationBase64(decodedDataParam);
         const binaryData = atob(base64Data);
         const bytes = new Uint8Array(binaryData.length);
         for (let i = 0; i < binaryData.length; i++) {
