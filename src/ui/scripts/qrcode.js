@@ -13,6 +13,11 @@ export function getQRCodeCode() {
     // 连续扫描模式状态
     let continuousScanMode = false;
     let continuousScanCount = 0;
+    let scanFrameCounter = 0;
+    let lastScanAttemptAt = 0;
+    const SCAN_MIN_INTERVAL_MS = 80;
+    const DEEP_SCAN_INTERVAL = 4;
+    const CENTER_CROP_RATIO = 0.72;
 
     // 切换连续扫描模式
     function toggleContinuousScan() {
@@ -369,6 +374,8 @@ export function getQRCodeCode() {
         status.textContent = '';
         status.style.display = 'none';
         isScanning = true;
+        scanFrameCounter = 0;
+        lastScanAttemptAt = 0;
 
         // 创建画布用于分析图像
         if (!scannerCanvas) {
@@ -438,6 +445,8 @@ export function getQRCodeCode() {
     // 停止二维码扫描器
     function stopQRScanner() {
       isScanning = false;
+      scanFrameCounter = 0;
+      lastScanAttemptAt = 0;
       if (scanInterval) {
         clearInterval(scanInterval);
         scanInterval = null;
@@ -469,12 +478,18 @@ export function getQRCodeCode() {
     function scanForQRCode() {
       if (!isScanning) return;
 
+      const now = Date.now();
+      if (now - lastScanAttemptAt < SCAN_MIN_INTERVAL_MS) {
+        requestAnimationFrame(scanForQRCode);
+        return;
+      }
+      lastScanAttemptAt = now;
+
       const video = document.getElementById('scannerVideo');
       const status = document.getElementById('scannerStatus');
 
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         try {
-          // 设置画布尺寸
           const videoWidth = video.videoWidth;
           const videoHeight = video.videoHeight;
 
@@ -482,17 +497,15 @@ export function getQRCodeCode() {
             scannerCanvas.width = videoWidth;
             scannerCanvas.height = videoHeight;
 
-            // 绘制当前帧到画布
             scannerContext.drawImage(video, 0, 0, videoWidth, videoHeight);
-
-            // 获取图像数据
             const imageData = scannerContext.getImageData(0, 0, videoWidth, videoHeight);
 
-            // 尝试解析二维码
-            const qrCode = decodeQRCode(imageData);
+            scanFrameCounter++;
+            const deepMode = scanFrameCounter % DEEP_SCAN_INTERVAL === 0;
+            const qrCode = decodeQRCode(imageData, { deep: deepMode });
 
             if (qrCode) {
-              console.log('二维码扫描成功!');
+              console.log('二维码扫描成功');
               processScannedQRCode(qrCode);
               return;
             }
@@ -501,32 +514,190 @@ export function getQRCodeCode() {
           console.error('扫描过程出错:', error);
         }
       } else {
-        // 视频还未准备好
         status.textContent = '正在加载摄像头...';
       }
 
-      // 继续扫描（提高频率到60fps）
       requestAnimationFrame(scanForQRCode);
     }
 
-    // 使用jsQR库进行二维码解码
-    function decodeQRCode(imageData) {
+    function runJsQRAttempts(imageData, parseOptions) {
+      for (let i = 0; i < parseOptions.length; i++) {
+        const option = parseOptions[i];
+        try {
+          const result = jsQR(imageData.data, imageData.width, imageData.height, option);
+          if (result && result.data) {
+            return result.data;
+          }
+        } catch (error) {
+          console.warn('二维码解析选项失败:', option, error.message);
+        }
+      }
+      return null;
+    }
+
+    function buildImageData(pixels, width, height) {
+      if (typeof ImageData !== 'undefined') {
+        return new ImageData(pixels, width, height);
+      }
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = width;
+      tempCanvas.height = height;
+      const tempCtx = tempCanvas.getContext('2d');
+      const newImageData = tempCtx.createImageData(width, height);
+      newImageData.data.set(pixels);
+      return newImageData;
+    }
+
+    function extractCenterImageData(imageData, ratio = 0.72) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const cropWidth = Math.max(64, Math.floor(width * ratio));
+      const cropHeight = Math.max(64, Math.floor(height * ratio));
+
+      if (cropWidth >= width || cropHeight >= height) {
+        return imageData;
+      }
+
+      const startX = Math.floor((width - cropWidth) / 2);
+      const startY = Math.floor((height - cropHeight) / 2);
+      const output = new Uint8ClampedArray(cropWidth * cropHeight * 4);
+
+      for (let y = 0; y < cropHeight; y++) {
+        for (let x = 0; x < cropWidth; x++) {
+          const srcIndex = ((startY + y) * width + (startX + x)) * 4;
+          const destIndex = (y * cropWidth + x) * 4;
+          output[destIndex] = imageData.data[srcIndex];
+          output[destIndex + 1] = imageData.data[srcIndex + 1];
+          output[destIndex + 2] = imageData.data[srcIndex + 2];
+          output[destIndex + 3] = imageData.data[srcIndex + 3];
+        }
+      }
+
+      return buildImageData(output, cropWidth, cropHeight);
+    }
+
+    function downscaleImageData(imageData, maxSide = 960) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const largestSide = Math.max(width, height);
+      if (largestSide <= maxSide) {
+        return imageData;
+      }
+
+      const ratio = maxSide / largestSide;
+      const targetWidth = Math.max(1, Math.floor(width * ratio));
+      const targetHeight = Math.max(1, Math.floor(height * ratio));
+
+      const sourceCanvas = document.createElement('canvas');
+      sourceCanvas.width = width;
+      sourceCanvas.height = height;
+      const sourceCtx = sourceCanvas.getContext('2d');
+      sourceCtx.putImageData(imageData, 0, 0);
+
+      const targetCanvas = document.createElement('canvas');
+      targetCanvas.width = targetWidth;
+      targetCanvas.height = targetHeight;
+      const targetCtx = targetCanvas.getContext('2d');
+      targetCtx.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight);
+
+      return targetCtx.getImageData(0, 0, targetWidth, targetHeight);
+    }
+
+    function enhanceImageData(imageData, mode) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const source = imageData.data;
+      const output = new Uint8ClampedArray(source.length);
+
+      let averageLuma = 0;
+      let thresholdOffset = 0;
+      if (mode === 'binary' || mode === 'binaryAdaptive') {
+        let lumaSum = 0;
+        for (let i = 0; i < source.length; i += 4) {
+          lumaSum += source[i] * 0.299 + source[i + 1] * 0.587 + source[i + 2] * 0.114;
+        }
+        averageLuma = lumaSum / (source.length / 4);
+        if (mode === 'binaryAdaptive') {
+          thresholdOffset = averageLuma < 110 ? -18 : (averageLuma > 180 ? 18 : 0);
+        }
+      }
+
+      for (let i = 0; i < source.length; i += 4) {
+        const luma = source[i] * 0.299 + source[i + 1] * 0.587 + source[i + 2] * 0.114;
+        let value = luma;
+
+        if (mode === 'contrast') {
+          value = (luma - 128) * 1.6 + 128;
+        } else if (mode === 'contrastStrong') {
+          value = (luma - 128) * 2.0 + 128;
+        } else if (mode === 'binary') {
+          value = luma > averageLuma ? 255 : 0;
+        } else if (mode === 'binaryAdaptive') {
+          value = luma > (averageLuma + thresholdOffset) ? 255 : 0;
+        }
+
+        value = Math.max(0, Math.min(255, Math.round(value)));
+        output[i] = value;
+        output[i + 1] = value;
+        output[i + 2] = value;
+        output[i + 3] = 255;
+      }
+
+      return buildImageData(output, width, height);
+    }
+
+    // 使用 jsQR 进行增强解码（快速路径 + 深度路径）
+    function decodeQRCode(imageData, options = {}) {
       try {
-        // 检查jsQR库是否已加载
         if (typeof jsQR === 'undefined') {
           console.warn('jsQR库未加载，无法解析二维码');
           return null;
         }
 
-        // 使用jsQR库进行解析
-        const qrResult = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: "dontInvert", // 提高性能
-        });
+        const quickOptions = [
+          { inversionAttempts: 'dontInvert' },
+          { inversionAttempts: 'invertFirst' },
+          { inversionAttempts: 'attemptBoth' }
+        ];
+        const deepOptions = [
+          { inversionAttempts: 'attemptBoth' },
+          { inversionAttempts: 'invertFirst' },
+          { inversionAttempts: 'onlyInvert' }
+        ];
 
-        if (qrResult && qrResult.data) {
-          console.log('二维码解析成功:', qrResult.data);
-          return qrResult.data;
+        // 快速路径：先全图，再中心区域
+        let result = runJsQRAttempts(imageData, quickOptions);
+        if (result) return result;
+
+        const centerImageData = extractCenterImageData(imageData, CENTER_CROP_RATIO);
+        if (centerImageData !== imageData) {
+          result = runJsQRAttempts(centerImageData, quickOptions);
+          if (result) return result;
         }
+
+        // 深度路径：仅周期性触发，避免实时扫描开销过大
+        if (!options.deep) {
+          return null;
+        }
+
+        const optimizedImageData = downscaleImageData(imageData, 960);
+        const contrastImageData = enhanceImageData(optimizedImageData, 'contrast');
+        result = runJsQRAttempts(contrastImageData, deepOptions);
+        if (result) return result;
+
+        const binaryImageData = enhanceImageData(optimizedImageData, 'binary');
+        result = runJsQRAttempts(binaryImageData, deepOptions);
+        if (result) return result;
+
+        const optimizedCenterImageData = extractCenterImageData(optimizedImageData, CENTER_CROP_RATIO);
+        const centerContrast = enhanceImageData(optimizedCenterImageData, 'contrastStrong');
+        result = runJsQRAttempts(centerContrast, deepOptions);
+        if (result) return result;
+
+        const centerBinary = enhanceImageData(optimizedCenterImageData, 'binaryAdaptive');
+        result = runJsQRAttempts(centerBinary, deepOptions);
+        if (result) return result;
 
         return null;
       } catch (error) {
@@ -687,18 +858,13 @@ export function getQRCodeCode() {
             ctx.drawImage(img, 0, 0);
 
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const qrCode = decodeQRCode(imageData, { deep: true });
 
-            if (typeof jsQR !== 'undefined') {
-              const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-              if (code) {
-                hideQRScanner();
-                processScannedQRCode(code.data);
-              } else {
-                showCenterToast('❌', '未在图片中找到二维码，请尝试其他图片');
-              }
+            if (qrCode) {
+              hideQRScanner();
+              processScannedQRCode(qrCode);
             } else {
-              showCenterToast('❌', '二维码解析库未加载');
+              showCenterToast('❌', '未在图片中找到二维码，请尝试其他图片');
             }
           };
           img.src = e.target.result;
@@ -787,32 +953,9 @@ export function getQRCodeCode() {
               const imageData = ctx.getImageData(0, 0, width, height);
               console.log('获取图像数据成功，像素数:', imageData.data.length / 4);
 
-              // 尝试解析二维码（多种配置）
+              // 尝试解析二维码（增强模式）
               status.textContent = '正在解析二维码...';
-
-              let qrCode = null;
-
-              // 尝试不同的解析选项
-              const parseOptions = [
-                { inversionAttempts: "dontInvert" },
-                { inversionAttempts: "onlyInvert" },
-                { inversionAttempts: "attemptBoth" },
-                { inversionAttempts: "attemptBoth", margin: 5 }
-              ];
-
-              for (let i = 0; i < parseOptions.length && !qrCode; i++) {
-                try {
-                  console.log('尝试解析选项 ' + (i + 1) + ':', parseOptions[i]);
-                  const result = jsQR(imageData.data, imageData.width, imageData.height, parseOptions[i]);
-                  if (result && result.data) {
-                    qrCode = result.data;
-                    console.log('二维码解析成功（选项 ' + (i + 1) + '）:', qrCode);
-                    break;
-                  }
-                } catch (parseError) {
-                  console.warn('解析选项 ' + (i + 1) + ' 失败:', parseError);
-                }
-              }
+              const qrCode = decodeQRCode(imageData, { deep: true });
 
               if (qrCode) {
                 status.textContent = '二维码解析成功！';

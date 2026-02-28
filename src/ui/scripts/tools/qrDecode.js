@@ -12,6 +12,12 @@ export function getQRDecodeToolCode() {
     let decodeStream = null;
     let decodeInterval = null;
     let isDecodeScanning = false;
+    let decodeFrameCounter = 0;
+    let lastDecodeAttemptAt = 0;
+    let decodeCanvas = null;
+    let decodeContext = null;
+    const DECODE_MIN_INTERVAL_MS = 80;
+    const DEEP_DECODE_INTERVAL = 4;
 
     function showQRDecodeModal() {
       showModal('qrDecodeModal', () => {
@@ -183,6 +189,12 @@ export function getQRDecodeToolCode() {
         status.textContent = '';
         status.style.display = 'none';
         isDecodeScanning = true;
+        decodeFrameCounter = 0;
+        lastDecodeAttemptAt = 0;
+        if (!decodeCanvas) {
+          decodeCanvas = document.createElement('canvas');
+          decodeContext = decodeCanvas.getContext('2d');
+        }
 
         // 开始扫描
         setTimeout(() => {
@@ -212,6 +224,8 @@ export function getQRDecodeToolCode() {
 
     function stopDecodeScanner() {
       isDecodeScanning = false;
+      decodeFrameCounter = 0;
+      lastDecodeAttemptAt = 0;
       if (decodeInterval) {
         clearInterval(decodeInterval);
         decodeInterval = null;
@@ -227,28 +241,69 @@ export function getQRDecodeToolCode() {
       startDecodeCamera();
     }
 
+    function decodeQRCodeForTool(imageData, deepMode) {
+      // 优先复用主二维码模块的增强解码能力
+      if (typeof decodeQRCode === 'function') {
+        return decodeQRCode(imageData, { deep: deepMode });
+      }
+
+      // 回退：工具模块内最小可用策略
+      if (typeof jsQR === 'undefined') {
+        return null;
+      }
+
+      const parseOptions = deepMode
+        ? [
+            { inversionAttempts: 'invertFirst' },
+            { inversionAttempts: 'dontInvert' },
+            { inversionAttempts: 'attemptBoth' },
+            { inversionAttempts: 'onlyInvert' }
+          ]
+        : [
+            { inversionAttempts: 'invertFirst' },
+            { inversionAttempts: 'dontInvert' },
+            { inversionAttempts: 'attemptBoth' }
+          ];
+
+      for (let i = 0; i < parseOptions.length; i++) {
+        try {
+          const result = jsQR(imageData.data, imageData.width, imageData.height, parseOptions[i]);
+          if (result && result.data) {
+            return result.data;
+          }
+        } catch (error) {
+          console.warn('工具二维码解析选项失败:', parseOptions[i], error.message);
+        }
+      }
+
+      return null;
+    }
+
     function scanForDecodeQRCode() {
       if (!isDecodeScanning) return;
+      const now = Date.now();
+      if (now - lastDecodeAttemptAt < DECODE_MIN_INTERVAL_MS) {
+        requestAnimationFrame(scanForDecodeQRCode);
+        return;
+      }
+      lastDecodeAttemptAt = now;
 
       const video = document.getElementById('decodeScannerVideo');
       const status = document.getElementById('decodeScannerStatus');
 
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         try {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
           const videoWidth = video.videoWidth;
           const videoHeight = video.videoHeight;
 
-          if (videoWidth > 0 && videoHeight > 0) {
-            canvas.width = videoWidth;
-            canvas.height = videoHeight;
-
-            ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
-
-            const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
-            const qrCode = decodeQRCode(imageData);
+          if (videoWidth > 0 && videoHeight > 0 && decodeCanvas && decodeContext) {
+            decodeCanvas.width = videoWidth;
+            decodeCanvas.height = videoHeight;
+            decodeContext.drawImage(video, 0, 0, videoWidth, videoHeight);
+            const imageData = decodeContext.getImageData(0, 0, videoWidth, videoHeight);
+            decodeFrameCounter++;
+            const deepMode = decodeFrameCounter % DEEP_DECODE_INTERVAL === 0;
+            const qrCode = decodeQRCodeForTool(imageData, deepMode);
 
             if (qrCode) {
               console.log('二维码解析成功:', qrCode);
@@ -299,17 +354,12 @@ export function getQRDecodeToolCode() {
             ctx.drawImage(img, 0, 0);
 
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const qrCode = decodeQRCodeForTool(imageData, true);
 
-            if (typeof jsQR !== 'undefined') {
-              const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-              if (code) {
-                processDecodeResult(code.data);
-              } else {
-                showCenterToast('❌', '未在图片中找到二维码，请尝试其他图片');
-              }
+            if (qrCode) {
+              processDecodeResult(qrCode);
             } else {
-              showCenterToast('❌', '二维码解析库未加载');
+              showCenterToast('❌', '未在图片中找到二维码，请尝试其他图片');
             }
           };
           img.src = e.target.result;

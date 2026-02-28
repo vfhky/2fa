@@ -14,18 +14,16 @@
 - **[开发文档](DEVELOPMENT.md)** - 本地开发、测试、部署流程
 - **[架构文档](ARCHITECTURE.md)** - 系统设计和技术架构
 - **[API 参考](API_REFERENCE.md)** - API 端点和集成文档
-- **[安全审计与加固方案](SECURITY_AUDIT_AND_HARDENING_PLAN.md)** - 漏洞分级、整改优先级与落地计划
 
 ## 📁 文档列表
 
-| 文档                                                                         | 说明               | 适用对象        |
-| ---------------------------------------------------------------------------- | ------------------ | --------------- |
-| [DEPLOYMENT.md](DEPLOYMENT.md)                                               | 部署指南           | 所有用户        |
-| [DEVELOPMENT.md](DEVELOPMENT.md)                                             | 开发文档           | 开发者          |
-| [ARCHITECTURE.md](ARCHITECTURE.md)                                           | 架构文档           | 开发者          |
-| [API_REFERENCE.md](API_REFERENCE.md)                                         | API 参考           | 集成开发者      |
-| [SECURITY_AUDIT_AND_HARDENING_PLAN.md](SECURITY_AUDIT_AND_HARDENING_PLAN.md) | 安全审计与加固方案 | 开发者/安全审计 |
-| [PWA_GUIDE.md](PWA_GUIDE.md)                                                 | PWA 指南           | 终端用户        |
+| 文档                                 | 说明     | 适用对象   |
+| ------------------------------------ | -------- | ---------- |
+| [DEPLOYMENT.md](DEPLOYMENT.md)       | 部署指南 | 所有用户   |
+| [DEVELOPMENT.md](DEVELOPMENT.md)     | 开发文档 | 开发者     |
+| [ARCHITECTURE.md](ARCHITECTURE.md)   | 架构文档 | 开发者     |
+| [API_REFERENCE.md](API_REFERENCE.md) | API 参考 | 集成开发者 |
+| [PWA_GUIDE.md](PWA_GUIDE.md)         | PWA 指南 | 终端用户   |
 
 ## 🔍 我想...
 
@@ -33,7 +31,6 @@
 - **本地开发** → [DEVELOPMENT.md](DEVELOPMENT.md#开发环境)
 - **了解架构** → [ARCHITECTURE.md](ARCHITECTURE.md)
 - **调用 API** → [API_REFERENCE.md](API_REFERENCE.md)
-- **查看安全整改方案** → [SECURITY_AUDIT_AND_HARDENING_PLAN.md](SECURITY_AUDIT_AND_HARDENING_PLAN.md)
 - **安装 PWA** → [PWA_GUIDE.md](PWA_GUIDE.md)
 - **运行测试** → [DEVELOPMENT.md](DEVELOPMENT.md#测试指南)
 - **故障排查** → [DEVELOPMENT.md](DEVELOPMENT.md#故障排查)

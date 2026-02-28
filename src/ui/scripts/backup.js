@@ -290,11 +290,14 @@ export function getBackupCode() {
         if (!response.ok) {
           throw new Error(result.message || result.error || '删除失败');
         }
-        if (result.success !== true && (result.failedCount || 0) > 0) {
+        if (result.success === true) {
+          showCenterToast('✅', '备份删除成功');
+        } else if ((result.deletedCount || 0) > 0 && (result.failedCount || 0) > 0) {
+          showCenterToast('⚠️', '部分成功：已删除 ' + result.deletedCount + ' 个，失败 ' + result.failedCount + ' 个');
+        } else {
           throw new Error(result.message || '删除未完成');
         }
 
-        showCenterToast('✅', '备份删除成功');
         clearBackupSelection();
         await loadBackupList();
       } catch (error) {
@@ -339,11 +342,14 @@ export function getBackupCode() {
         if (!response.ok) {
           throw new Error(result.message || result.error || '删除失败');
         }
-        if (result.success !== true && (result.failedCount || 0) > 0) {
+        if (result.success === true) {
+          showCenterToast('✅', '已删除 ' + (result.deletedCount || 0) + ' 个备份');
+        } else if ((result.deletedCount || 0) > 0 && (result.failedCount || 0) > 0) {
+          showCenterToast('⚠️', '部分成功：已删除 ' + result.deletedCount + ' 个，失败 ' + result.failedCount + ' 个');
+        } else {
           throw new Error(result.message || '删除未完成');
         }
 
-        showCenterToast('✅', '已删除 ' + (result.deletedCount || 0) + ' 个备份');
         clearBackupSelection();
         await loadBackupList();
       } catch (error) {
