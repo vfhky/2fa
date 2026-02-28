@@ -1072,6 +1072,7 @@ export function getModalStyles() {
         align-items: center;
         margin-top: 10px;
         gap: 8px;
+        flex-wrap: wrap;
       }
 
       .preview-header {

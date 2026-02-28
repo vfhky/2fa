@@ -16,6 +16,7 @@ import {
 	handleGetSecretsStats,
 	handleBackupSecrets,
 	handleGetBackups,
+	handleDeleteBackups,
 	handleRestoreBackup,
 	handleExportBackup,
 } from '../api/secrets/index.js';
@@ -293,6 +294,8 @@ async function handleApiRequest(pathname, method, request, env) {
 				return handleBackupSecrets(request, env);
 			case 'GET':
 				return handleGetBackups(request, env);
+			case 'DELETE':
+				return handleDeleteBackups(request, env);
 			default:
 				return createErrorResponse('方法不允许', `不支持的HTTP方法: ${method}`, 405, request);
 		}

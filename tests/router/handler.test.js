@@ -21,6 +21,7 @@ vi.mock('../../src/api/secrets/index.js', () => ({
   handleGetSecretsStats: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, data: { overview: { totalSecrets: 0 } } }), { status: 200 })),
   handleBackupSecrets: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   handleGetBackups: vi.fn(async (request, env) => new Response(JSON.stringify({ backups: [] }), { status: 200 })),
+  handleDeleteBackups: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, deletedCount: 1 }), { status: 200 })),
   handleRestoreBackup: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   handleExportBackup: vi.fn(async (request, env, key) => new Response(JSON.stringify({ data: {} }), { status: 200 }))
 }));
@@ -626,7 +627,7 @@ describe('Router Handler', () => {
 
     it('应该拒绝 /api/backup 的不支持方法', async () => {
       const request = createMockRequest({
-        method: 'DELETE',
+        method: 'PUT',
         pathname: '/api/backup'
       });
       const env = createMockEnv();
@@ -634,6 +635,22 @@ describe('Router Handler', () => {
       const response = await handleRequest(request, env);
 
       expect(response.status).toBe(405);
+    });
+
+    it('应该处理 DELETE /api/backup', async () => {
+      const { handleDeleteBackups } = await import('../../src/api/secrets/index.js');
+
+      const request = createMockRequest({
+        method: 'DELETE',
+        pathname: '/api/backup',
+        body: { all: true }
+      });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(handleDeleteBackups).toHaveBeenCalledWith(request, env);
+      expect(response.status).toBe(200);
     });
 
     it('应该处理 POST /api/backup/restore', async () => {

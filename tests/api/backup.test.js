@@ -7,7 +7,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   handleBackupSecrets,
-  handleGetBackups
+  handleGetBackups,
+  handleDeleteBackups
 } from '../../src/api/secrets/backup.js';
 import {
   handleRestoreBackup,
@@ -545,6 +546,79 @@ describe('Backup API Module', () => {
       expect(response.status).toBe(200);
       expect(data.backups.length).toBe(20); // 实际只有20个
       expect(data.pagination.limit).toBe(500);
+    });
+  });
+
+  describe('handleDeleteBackups - 批量删除备份', () => {
+    it('应该支持按 keys 删除备份', async () => {
+      const env = createMockEnv();
+
+      await env.SECRETS_KV.put('backup_2026-01-01_00-00-00.json', JSON.stringify({ count: 1, secrets: [] }));
+      await env.SECRETS_KV.put('backup_2026-01-02_00-00-00.json', JSON.stringify({ count: 1, secrets: [] }));
+
+      const request = createMockRequest(
+        { keys: ['backup_2026-01-01_00-00-00.json'] },
+        'DELETE',
+        'https://example.com/api/backup'
+      );
+      const response = await handleDeleteBackups(request, env);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.mode).toBe('keys');
+      expect(data.deletedCount).toBe(1);
+      expect(await env.SECRETS_KV.get('backup_2026-01-01_00-00-00.json', 'text')).toBeNull();
+      expect(await env.SECRETS_KV.get('backup_2026-01-02_00-00-00.json', 'text')).not.toBeNull();
+    });
+
+    it('应该支持删除全部备份', async () => {
+      const env = createMockEnv();
+
+      await env.SECRETS_KV.put('backup_2026-01-01_00-00-00.json', JSON.stringify({ count: 1, secrets: [] }));
+      await env.SECRETS_KV.put('backup_2026-01-02_00-00-00.json', JSON.stringify({ count: 1, secrets: [] }));
+      await env.SECRETS_KV.put('secrets', JSON.stringify([{ id: '1', name: 'keep' }]));
+
+      const request = createMockRequest({ all: true }, 'DELETE', 'https://example.com/api/backup');
+      const response = await handleDeleteBackups(request, env);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.mode).toBe('all');
+      expect(data.deletedCount).toBe(2);
+      expect(await env.SECRETS_KV.get('backup_2026-01-01_00-00-00.json', 'text')).toBeNull();
+      expect(await env.SECRETS_KV.get('backup_2026-01-02_00-00-00.json', 'text')).toBeNull();
+      expect(await env.SECRETS_KV.get('secrets', 'text')).not.toBeNull();
+    });
+
+    it('应该拒绝无效的删除请求', async () => {
+      const env = createMockEnv();
+      const request = createMockRequest({}, 'DELETE', 'https://example.com/api/backup');
+      const response = await handleDeleteBackups(request, env);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error).toContain('删除请求无效');
+    });
+
+    it('当 keys 中含不存在备份时应返回部分成功', async () => {
+      const env = createMockEnv();
+      await env.SECRETS_KV.put('backup_2026-01-01_00-00-00.json', JSON.stringify({ count: 1, secrets: [] }));
+
+      const request = createMockRequest(
+        { keys: ['backup_2026-01-01_00-00-00.json', 'backup_2026-01-03_00-00-00.json'] },
+        'DELETE',
+        'https://example.com/api/backup'
+      );
+      const response = await handleDeleteBackups(request, env);
+      const data = await response.json();
+
+      expect(response.status).toBe(207);
+      expect(data.success).toBe(false);
+      expect(data.deletedCount).toBe(1);
+      expect(data.failedCount).toBe(1);
+      expect(data.notFoundCount).toBe(1);
     });
   });
 

@@ -15,6 +15,39 @@ export function getBackupCode() {
     let backupList = [];
     let backupExportFormat = 'txt'; // 备份导出格式
 
+    function setBackupActionStates(hasSelection, hasBackups) {
+      const confirmRestoreBtn = document.getElementById('confirmRestoreBtn');
+      const exportBackupBtn = document.getElementById('exportBackupBtn');
+      const deleteSelectedBackupBtn = document.getElementById('deleteSelectedBackupBtn');
+      const deleteAllBackupsBtn = document.getElementById('deleteAllBackupsBtn');
+
+      if (confirmRestoreBtn) {
+        confirmRestoreBtn.disabled = !hasSelection;
+      }
+      if (exportBackupBtn) {
+        exportBackupBtn.disabled = !hasSelection;
+      }
+      if (deleteSelectedBackupBtn) {
+        deleteSelectedBackupBtn.disabled = !hasSelection;
+      }
+      if (deleteAllBackupsBtn) {
+        deleteAllBackupsBtn.disabled = !hasBackups;
+      }
+    }
+
+    function clearBackupSelection() {
+      selectedBackup = null;
+      const backupSelectElement = document.getElementById('backupSelect');
+      const previewElement = document.getElementById('restorePreview');
+
+      if (backupSelectElement) {
+        backupSelectElement.value = '';
+      }
+      if (previewElement) {
+        previewElement.style.display = 'none';
+      }
+    }
+
     function showRestoreModal() {
       showModal('restoreModal', () => {
         loadBackupList();
@@ -23,17 +56,18 @@ export function getBackupCode() {
 
     function hideRestoreModal() {
       hideModal('restoreModal', () => {
-        selectedBackup = null;
-        document.getElementById('confirmRestoreBtn').disabled = true;
-        document.getElementById('exportBackupBtn').disabled = true;
-        document.getElementById('restorePreview').style.display = 'none';
+        clearBackupSelection();
+        setBackupActionStates(false, false);
       });
     }
 
     async function loadBackupList() {
       const backupSelectElement = document.getElementById('backupSelect');
+      backupList = [];
       backupSelectElement.innerHTML = '<option value="">正在加载备份列表...</option>';
       backupSelectElement.disabled = true;
+      clearBackupSelection();
+      setBackupActionStates(false, false);
 
       try {
 	        // 加载所有备份（不限数量，列表页使用轻量模式避免高开销）
@@ -48,16 +82,20 @@ export function getBackupCode() {
         if (backupList.length === 0) {
           backupSelectElement.innerHTML = '<option value="">暂无备份文件</option>';
           backupSelectElement.disabled = true;
+          setBackupActionStates(false, false);
           return;
         }
 
         // 渲染备份下拉选择框
         renderBackupSelect(backupList);
         backupSelectElement.disabled = false;
+        setBackupActionStates(false, true);
 	      } catch (error) {
+	        backupList = [];
 	        console.error('加载备份列表失败:', error);
 	        backupSelectElement.innerHTML = '<option value="">加载备份列表失败: ' + escapeHTML(error.message || '未知错误') + '</option>';
 	        backupSelectElement.disabled = true;
+	        setBackupActionStates(false, false);
 	      }
 	    }
 
@@ -77,14 +115,17 @@ export function getBackupCode() {
         // 移动端优化：格式 "年-月-日 时:分 | 数量个"
         // 例如：2025-11-24 19:50 | 117个
         const backupTime = year + '-' + month + '-' + day + ' ' + hours + ':' + minutes;
-        const optionText = backupTime + ' | ' + (backup.count || 0) + '个';
+        const countValue = Number.isFinite(backup.count) ? backup.count : null;
+        const countText = countValue === null || countValue < 0 ? '未知' : (countValue + '个');
+        const optionText = backupTime + ' | ' + countText;
 
         const option = document.createElement('option');
         option.value = index;
         option.textContent = optionText;
         option.dataset.backupKey = backup.key;
         // 保存完整时间信息在 title 属性中，用于悬停提示
-        option.title = new Date(backup.created).toLocaleString('zh-CN');
+        const titleSuffix = countText === '未知' ? '（条目数未知，旧备份可通过预览获取真实数量）' : '';
+        option.title = new Date(backup.created).toLocaleString('zh-CN') + titleSuffix;
 
         backupSelectElement.appendChild(option);
       });
@@ -95,23 +136,20 @@ export function getBackupCode() {
       const selectedIndex = backupSelectElement.value;
 
       if (selectedIndex === '' || selectedIndex === null) {
-        selectedBackup = null;
-        document.getElementById('confirmRestoreBtn').disabled = true;
-        document.getElementById('exportBackupBtn').disabled = true;
-        document.getElementById('restorePreview').style.display = 'none';
+        clearBackupSelection();
+        setBackupActionStates(false, backupList.length > 0);
         return;
       }
 
-      const backup = backupList[parseInt(selectedIndex)];
+      const backup = backupList[parseInt(selectedIndex, 10)];
       if (backup) {
-        selectBackup(backup, parseInt(selectedIndex));
+        selectBackup(backup, parseInt(selectedIndex, 10));
       }
     }
 
     async function selectBackup(backup, index) {
       selectedBackup = backup;
-      document.getElementById('confirmRestoreBtn').disabled = false;
-      document.getElementById('exportBackupBtn').disabled = false;
+      setBackupActionStates(true, backupList.length > 0);
 
       // 显示备份预览
       await showBackupPreview(backup);
@@ -219,6 +257,101 @@ export function getBackupCode() {
       } finally {
         confirmBtn.textContent = originalText;
         confirmBtn.disabled = false;
+      }
+    }
+
+    async function deleteSelectedBackup() {
+      if (!selectedBackup) {
+        showCenterToast('❌', '请先选择一个备份文件');
+        return;
+      }
+
+      const backupLabel = selectedBackup.key.replace('backup_', '').replace('.json', '');
+      const confirmed = confirm('确定删除备份 "' + backupLabel + '" 吗？\\n\\n⚠️ 删除后将无法恢复此备份！');
+      if (!confirmed) {
+        return;
+      }
+
+      const deleteBtn = document.getElementById('deleteSelectedBackupBtn');
+      const originalText = deleteBtn.textContent;
+      deleteBtn.textContent = '删除中...';
+      deleteBtn.disabled = true;
+
+      try {
+        const response = await authenticatedFetch('/api/backup', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ keys: [selectedBackup.key] })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.message || result.error || '删除失败');
+        }
+        if (result.success !== true && (result.failedCount || 0) > 0) {
+          throw new Error(result.message || '删除未完成');
+        }
+
+        showCenterToast('✅', '备份删除成功');
+        clearBackupSelection();
+        await loadBackupList();
+      } catch (error) {
+        console.error('删除备份失败:', error);
+        showCenterToast('❌', '删除失败: ' + error.message);
+      } finally {
+        deleteBtn.textContent = originalText;
+        setBackupActionStates(!!selectedBackup, backupList.length > 0);
+      }
+    }
+
+    async function deleteAllBackups() {
+      if (!Array.isArray(backupList) || backupList.length === 0) {
+        showCenterToast('ℹ️', '当前没有可删除的备份');
+        return;
+      }
+
+      const confirmed = confirm(
+        '确定删除全部 ' +
+        backupList.length +
+        ' 个备份吗？\\n\\n⚠️ 该操作不可撤销，建议先导出需要保留的备份。'
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const deleteAllBtn = document.getElementById('deleteAllBackupsBtn');
+      const originalText = deleteAllBtn.textContent;
+      deleteAllBtn.textContent = '删除中...';
+      deleteAllBtn.disabled = true;
+
+      try {
+        const response = await authenticatedFetch('/api/backup', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ all: true })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.message || result.error || '删除失败');
+        }
+        if (result.success !== true && (result.failedCount || 0) > 0) {
+          throw new Error(result.message || '删除未完成');
+        }
+
+        showCenterToast('✅', '已删除 ' + (result.deletedCount || 0) + ' 个备份');
+        clearBackupSelection();
+        await loadBackupList();
+      } catch (error) {
+        console.error('删除全部备份失败:', error);
+        showCenterToast('❌', '删除失败: ' + error.message);
+      } finally {
+        deleteAllBtn.textContent = originalText;
+        setBackupActionStates(!!selectedBackup, backupList.length > 0);
       }
     }
 

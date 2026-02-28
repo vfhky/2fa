@@ -282,6 +282,33 @@
   2. 前端退出后可稳定回到登录态，不出现脏状态残留。
   3. logout 后历史 token（即使仍被持有）必须无法通过 `verifyAuth/refresh` 校验。
 
+## TASK-P3-04：备份批量删除能力（删除旧备份）
+
+- 目标：提供可控的备份清理能力，支持“一键删除全部旧备份”与“按 key 精确删除”。
+- 风险背景：
+  1. 仅支持自动保留策略时，无法立即清除历史旧备份。
+  2. 手工逐条处理成本高，易产生误操作和遗漏。
+- 代码改动点：
+  1. `src/api/secrets/backup.js`
+  2. `src/api/secrets/index.js`
+  3. `src/router/handler.js`
+  4. `src/ui/page.js`
+  5. `src/ui/scripts/backup.js`
+  6. `src/ui/styles/{modals,responsive}.js`
+  7. `tests/api/backup.test.js`
+  8. `tests/router/handler.test.js`
+- 具体实施：
+  1. 新增 `DELETE /api/backup`，支持两种模式：
+     - `{ all: true }`：删除全部备份
+     - `{ keys: [...] }`：批量删除指定备份
+  2. 后端删除接口启用敏感限流（`failMode=closed`），并对 key 格式、重复键、单次数量上限做严格校验。
+  3. 返回删除统计：`requestedCount/deletedCount/notFoundCount/failedCount`，便于审计与前端提示。
+  4. 前端恢复弹窗新增“删除当前”“删除全部”按钮，执行前二次确认，执行后自动刷新列表与状态。
+- 验收标准：
+  1. 可以在前端直接删除全部旧备份，且仅删除 `backup_*.json`。
+  2. `keys` 模式下非法 key 会被拒绝，避免误删非备份数据。
+  3. 路由/API/前端交互具备自动化测试覆盖。
+
 ## 5. 执行顺序与里程碑
 
 ### M1（立即）
@@ -343,6 +370,7 @@
 - [x] TASK-P3-01 备份保留条数环境化
 - [x] TASK-P3-02 会话生命周期安全策略
 - [x] TASK-P3-03 显式登出链路
+- [x] TASK-P3-04 备份批量删除能力
 
 ## 9. 本轮验证结果（P3）
 
@@ -352,6 +380,7 @@
 4. `npm test -- --run tests/utils/auth.test.js tests/utils/auth.integration.test.js tests/utils/backup.test.js tests/router/handler.test.js` 通过
 5. `npm run lint` 通过
 6. 登出吊销验证通过（旧 token 在 `verifyAuth/refresh` 路径均被拒绝）
+7. `npm test -- --run tests/api/backup.test.js tests/router/handler.test.js` 通过（含批量删除场景）
 
 ---
 

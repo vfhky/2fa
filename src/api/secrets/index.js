@@ -24,7 +24,7 @@ export { handleBatchAddSecrets, handleBatchDeleteSecrets } from './batch.js';
 export { handleGetSecretsStats } from './stats.js';
 
 // 备份处理器
-export { handleBackupSecrets, handleGetBackups } from './backup.js';
+export { handleBackupSecrets, handleGetBackups, handleDeleteBackups } from './backup.js';
 
 // 恢复和导出处理器
 export { handleExportBackup, handleRestoreBackup } from './restore.js';

@@ -113,6 +113,7 @@ export function getResponsiveStyles() {
         margin-top: 12px;
         gap: 12px;
         width: 100%;
+        flex-wrap: wrap;
       }
 
       .backup-select-wrapper {
@@ -798,6 +799,7 @@ export function getResponsiveStyles() {
         align-items: center !important;
         margin-top: 12px !important;
         gap: 12px !important;
+        flex-wrap: wrap !important;
       }
 
       /* 中等屏幕下拉框优化 */
@@ -1013,6 +1015,7 @@ export function getResponsiveStyles() {
         align-items: center !important;
         margin-top: 15px !important;
         gap: 15px !important;
+        flex-wrap: wrap !important;
       }
 
       /* 大屏幕下拉框优化 */
