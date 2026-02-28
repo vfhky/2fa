@@ -477,6 +477,11 @@ export function getBaseStyles() {
       color: #c2185b;
     }
 
+    .action-submenu.show .submenu-item:nth-child(9):hover {
+      background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+      color: #b71c1c;
+    }
+
     /* 子菜单项的入场动画 */
     .action-submenu .submenu-item {
       transform: translateX(-20px);
@@ -519,6 +524,10 @@ export function getBaseStyles() {
 
     .action-submenu.show .submenu-item:nth-child(8) {
       transition-delay: 0.4s;
+    }
+
+    .action-submenu.show .submenu-item:nth-child(9) {
+      transition-delay: 0.45s;
     }
 
     /* 背景遮罩 */

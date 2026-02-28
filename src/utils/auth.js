@@ -19,21 +19,174 @@ import {
 } from './errors.js';
 
 // JWT 配置
-const JWT_EXPIRY_DAYS = 30; // JWT 有效期：30天
+const DEFAULT_AUTH_SESSION_TTL_DAYS = 30; // 单个 JWT 默认有效期
+const DEFAULT_AUTH_AUTO_REFRESH_THRESHOLD_DAYS = 7; // 剩余时间少于该值时触发自动续期
+const DEFAULT_AUTH_ABSOLUTE_TTL_DAYS = 30; // 从首次登录起的绝对会话上限
+const DEFAULT_AUTH_IDLE_TIMEOUT_MINUTES = 120; // 空闲超时（分钟）
 const JWT_ALGORITHM = 'HS256';
-const JWT_AUTO_REFRESH_THRESHOLD_DAYS = 7; // 剩余时间少于7天时自动续期
 
 // Cookie 配置
 const COOKIE_NAME = 'auth_token';
-const COOKIE_MAX_AGE = JWT_EXPIRY_DAYS * 24 * 60 * 60; // 30天（秒）
+const COOKIE_MAX_AGE = DEFAULT_AUTH_SESSION_TTL_DAYS * 24 * 60 * 60; // 30天（秒）
 
 // KV 存储键
 const KV_USER_PASSWORD_KEY = 'user_password';
 const KV_SETUP_COMPLETED_KEY = 'setup_completed';
+const KV_AUTH_SESSION_VERSION_KEY = 'auth_session_version';
 
 // 密码配置
 const PASSWORD_MIN_LENGTH = 8;
 const PBKDF2_ITERATIONS = 100000; // PBKDF2 迭代次数
+
+function parsePositiveIntEnv(value, fallback) {
+	if (value === undefined || value === null || value === '') {
+		return fallback;
+	}
+
+	const parsed = Number.parseInt(String(value), 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		return fallback;
+	}
+	return parsed;
+}
+
+function parseNonNegativeIntEnv(value, fallback) {
+	if (value === undefined || value === null || value === '') {
+		return fallback;
+	}
+
+	const parsed = Number.parseInt(String(value), 10);
+	if (!Number.isFinite(parsed) || parsed < 0) {
+		return fallback;
+	}
+	return parsed;
+}
+
+function toSecondsFromDays(days) {
+	return days * 24 * 60 * 60;
+}
+
+function getAuthSessionPolicy(env = {}) {
+	const sessionTtlDays = parsePositiveIntEnv(env.AUTH_SESSION_TTL_DAYS, DEFAULT_AUTH_SESSION_TTL_DAYS);
+	const autoRefreshThresholdDays = parseNonNegativeIntEnv(env.AUTH_AUTO_REFRESH_THRESHOLD_DAYS, DEFAULT_AUTH_AUTO_REFRESH_THRESHOLD_DAYS);
+	const absoluteTtlDays = parsePositiveIntEnv(env.AUTH_ABSOLUTE_TTL_DAYS, DEFAULT_AUTH_ABSOLUTE_TTL_DAYS);
+	const idleTimeoutMinutes = parseNonNegativeIntEnv(env.AUTH_IDLE_TIMEOUT_MINUTES, DEFAULT_AUTH_IDLE_TIMEOUT_MINUTES);
+
+	return {
+		sessionTtlDays,
+		autoRefreshThresholdDays,
+		absoluteTtlDays,
+		idleTimeoutMinutes,
+		sessionTtlSeconds: toSecondsFromDays(sessionTtlDays),
+		absoluteTtlSeconds: toSecondsFromDays(absoluteTtlDays),
+		idleTimeoutSeconds: idleTimeoutMinutes * 60,
+	};
+}
+
+function getNumericClaim(payload, key) {
+	const value = payload?.[key];
+	return Number.isFinite(value) ? value : null;
+}
+
+function normalizeSessionVersion(value) {
+	const parsed = Number.parseInt(String(value), 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		return 1;
+	}
+	return parsed;
+}
+
+async function getAuthSessionVersion(env) {
+	const storedVersion = await env.SECRETS_KV.get(KV_AUTH_SESSION_VERSION_KEY);
+	return normalizeSessionVersion(storedVersion);
+}
+
+async function setAuthSessionVersion(env, version) {
+	const normalized = normalizeSessionVersion(version);
+	await env.SECRETS_KV.put(KV_AUTH_SESSION_VERSION_KEY, String(normalized));
+	return normalized;
+}
+
+async function bumpAuthSessionVersion(env, currentVersion = null) {
+	const existingVersion = currentVersion ?? (await getAuthSessionVersion(env));
+	const nextVersion = existingVersion + 1;
+	await env.SECRETS_KV.put(KV_AUTH_SESSION_VERSION_KEY, String(nextVersion));
+	return nextVersion;
+}
+
+function isSessionVersionValid(payload, currentVersion) {
+	const tokenVersion = normalizeSessionVersion(payload?.sessionVersion ?? 1);
+	return tokenVersion === currentVersion;
+}
+
+function evaluateSessionPolicy(payload, policy, now = Math.floor(Date.now() / 1000)) {
+	const issuedAt = getNumericClaim(payload, 'iat') ?? now;
+	const origIat = getNumericClaim(payload, 'origIat') ?? issuedAt;
+	const lastActiveAt = getNumericClaim(payload, 'lastActiveAt') ?? issuedAt;
+
+	if (policy.absoluteTtlSeconds > 0 && now - origIat > policy.absoluteTtlSeconds) {
+		return {
+			valid: false,
+			reason: 'absolute_ttl_exceeded',
+			origIat,
+			lastActiveAt,
+		};
+	}
+
+	if (policy.idleTimeoutSeconds > 0 && now - lastActiveAt > policy.idleTimeoutSeconds) {
+		return {
+			valid: false,
+			reason: 'idle_timeout_exceeded',
+			origIat,
+			lastActiveAt,
+		};
+	}
+
+	return {
+		valid: true,
+		origIat,
+		lastActiveAt,
+		issuedAt,
+	};
+}
+
+function createSessionPayload(basePayload = {}, now = Math.floor(Date.now() / 1000), previousPayload = null) {
+	const existingOrigIat = getNumericClaim(previousPayload, 'origIat');
+	const existingLoginAt = typeof previousPayload?.loginAt === 'string' ? previousPayload.loginAt : null;
+	const existingSetupAt = typeof previousPayload?.setupAt === 'string' ? previousPayload.setupAt : null;
+	const existingSessionVersion = getNumericClaim(previousPayload, 'sessionVersion');
+	const baseSessionVersion = getNumericClaim(basePayload, 'sessionVersion');
+	const sessionVersion = normalizeSessionVersion(existingSessionVersion ?? baseSessionVersion ?? 1);
+
+	return {
+		auth: true,
+		...basePayload,
+		sessionVersion,
+		origIat: existingOrigIat ?? now,
+		lastActiveAt: now,
+		loginAt: basePayload.loginAt || existingLoginAt || new Date(now * 1000).toISOString(),
+		setupAt: basePayload.setupAt || existingSetupAt,
+	};
+}
+
+/**
+ * 恒时比较两个字节数组，避免短路比较带来的时序侧信道
+ * @param {Uint8Array} a
+ * @param {Uint8Array} b
+ * @returns {boolean}
+ */
+function timingSafeEqual(a, b) {
+	const maxLength = Math.max(a.length, b.length);
+	let diff = a.length ^ b.length;
+
+	for (let i = 0; i < maxLength; i++) {
+		const valueA = i < a.length ? a[i] : 0;
+		const valueB = i < b.length ? b[i] : 0;
+		diff |= valueA ^ valueB;
+	}
+
+	return diff === 0;
+}
 
 /**
  * 验证密码强度
@@ -123,13 +276,18 @@ async function hashPassword(password) {
 async function verifyPassword(password, storedHash, env = null) {
 	try {
 		// 分离盐值和哈希值
-		const [saltB64, hashB64] = storedHash.split('$');
+		const hashParts = typeof storedHash === 'string' ? storedHash.split('$') : [];
+		if (hashParts.length !== 2) {
+			return false;
+		}
+		const [saltB64, hashB64] = hashParts;
 		if (!saltB64 || !hashB64) {
 			return false;
 		}
 
 		// 解码盐值
 		const salt = Uint8Array.from(atob(saltB64), (c) => c.charCodeAt(0));
+		const expectedHashBytes = Uint8Array.from(atob(hashB64), (c) => c.charCodeAt(0));
 
 		// 将密码转换为 ArrayBuffer
 		const encoder = new TextEncoder();
@@ -150,11 +308,10 @@ async function verifyPassword(password, storedHash, env = null) {
 			256,
 		);
 
-		// 将计算的哈希值转换为 Base64
-		const calculatedHashB64 = btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
+		const calculatedHashBytes = new Uint8Array(hashBuffer);
 
-		// 比较哈希值
-		return calculatedHashB64 === hashB64;
+		// 恒时比较哈希值
+		return timingSafeEqual(calculatedHashBytes, expectedHashBytes);
 	} catch (error) {
 		if (env) {
 			const logger = getLogger(env);
@@ -177,7 +334,7 @@ async function verifyPassword(password, storedHash, env = null) {
  * @param {number} expiryDays - 过期天数
  * @returns {Promise<string>} JWT token
  */
-async function generateJWT(payload, secret, expiryDays = JWT_EXPIRY_DAYS) {
+async function generateJWT(payload, secret, expiryDays = DEFAULT_AUTH_SESSION_TTL_DAYS) {
 	const header = {
 		alg: JWT_ALGORITHM,
 		typ: 'JWT',
@@ -307,6 +464,11 @@ function createSetCookieHeader(token, maxAge = COOKIE_MAX_AGE) {
 	return cookieAttributes.join('; ');
 }
 
+function createClearCookieHeader() {
+	const expiredAt = 'Thu, 01 Jan 1970 00:00:00 GMT';
+	return `${createSetCookieHeader('', 0)}; Expires=${expiredAt}`;
+}
+
 /**
  * 从请求中获取 Cookie 中的 token
  * @param {Request} request - HTTP 请求对象
@@ -336,6 +498,7 @@ function getTokenFromCookie(request) {
  */
 export async function verifyAuth(request, env) {
 	const logger = getLogger(env);
+	const sessionPolicy = getAuthSessionPolicy(env);
 
 	// 🔑 检查 KV 中的用户密码
 	if (env.SECRETS_KV) {
@@ -364,6 +527,25 @@ export async function verifyAuth(request, env) {
 		if (token.includes('.')) {
 			const payload = await verifyJWT(token, storedPasswordHash, env);
 			if (payload) {
+				const currentSessionVersion = await getAuthSessionVersion(env);
+				if (!isSessionVersionValid(payload, currentSessionVersion)) {
+					logger.info('JWT 会话版本不匹配，拒绝访问', {
+						currentSessionVersion,
+						tokenSessionVersion: normalizeSessionVersion(payload.sessionVersion ?? 1),
+					});
+					return false;
+				}
+
+				const policyCheck = evaluateSessionPolicy(payload, sessionPolicy);
+				if (!policyCheck.valid) {
+					logger.info('JWT 会话策略校验失败', {
+						reason: policyCheck.reason,
+						absoluteTtlDays: sessionPolicy.absoluteTtlDays,
+						idleTimeoutMinutes: sessionPolicy.idleTimeoutMinutes,
+					});
+					return false;
+				}
+
 				logger.debug('JWT 验证成功', {
 					exp: new Date(payload.exp * 1000).toISOString(),
 				});
@@ -387,6 +569,7 @@ export async function verifyAuth(request, env) {
  */
 export async function verifyAuthWithDetails(request, env) {
 	const logger = getLogger(env);
+	const sessionPolicy = getAuthSessionPolicy(env);
 
 	// 🔑 检查 KV 中的用户密码
 	if (!env.SECRETS_KV) {
@@ -418,10 +601,29 @@ export async function verifyAuthWithDetails(request, env) {
 	if (token.includes('.')) {
 		const payload = await verifyJWT(token, storedPasswordHash, env);
 		if (payload && payload.exp) {
+			const currentSessionVersion = await getAuthSessionVersion(env);
+			if (!isSessionVersionValid(payload, currentSessionVersion)) {
+				logger.info('JWT 会话版本不匹配（详细），拒绝访问', {
+					currentSessionVersion,
+					tokenSessionVersion: normalizeSessionVersion(payload.sessionVersion ?? 1),
+				});
+				return null;
+			}
+
+			const policyCheck = evaluateSessionPolicy(payload, sessionPolicy);
+			if (!policyCheck.valid) {
+				logger.info('JWT 会话策略校验失败（详细）', {
+					reason: policyCheck.reason,
+					absoluteTtlDays: sessionPolicy.absoluteTtlDays,
+					idleTimeoutMinutes: sessionPolicy.idleTimeoutMinutes,
+				});
+				return null;
+			}
+
 			const now = Math.floor(Date.now() / 1000);
 			const remainingSeconds = payload.exp - now;
 			const remainingDays = remainingSeconds / (24 * 60 * 60);
-			const needsRefresh = remainingDays < JWT_AUTO_REFRESH_THRESHOLD_DAYS;
+			const needsRefresh = remainingDays < sessionPolicy.autoRefreshThresholdDays;
 
 			logger.debug('JWT 验证成功（详细）', {
 				exp: new Date(payload.exp * 1000).toISOString(),
@@ -435,6 +637,7 @@ export async function verifyAuthWithDetails(request, env) {
 				remainingDays,
 				needsRefresh,
 				token,
+				sessionPolicy,
 			};
 		}
 	}
@@ -475,11 +678,15 @@ export async function checkIfSetupRequired(env) {
  */
 export async function handleFirstTimeSetup(request, env) {
 	const logger = getLogger(env);
+	const sessionPolicy = getAuthSessionPolicy(env);
 
 	try {
 		// 🛡️ Rate Limiting: 防止暴力破解
 		const clientIP = getClientIdentifier(request, 'ip');
-		const rateLimitInfo = await checkRateLimit(clientIP, env, RATE_LIMIT_PRESETS.login);
+		const rateLimitInfo = await checkRateLimit(clientIP, env, {
+			...RATE_LIMIT_PRESETS.login,
+			failMode: 'closed',
+		});
 
 		if (!rateLimitInfo.allowed) {
 			logger.warn('首次设置速率限制超出', {
@@ -529,6 +736,7 @@ export async function handleFirstTimeSetup(request, env) {
 		// 存储到 KV
 		await env.SECRETS_KV.put(KV_USER_PASSWORD_KEY, passwordHash);
 		await env.SECRETS_KV.put(KV_SETUP_COMPLETED_KEY, new Date().toISOString());
+		const sessionVersion = await setAuthSessionVersion(env, 1);
 
 		logger.info('首次设置完成', {
 			setupAt: new Date().toISOString(),
@@ -536,16 +744,20 @@ export async function handleFirstTimeSetup(request, env) {
 		});
 
 		// 生成 JWT token
+		const now = Math.floor(Date.now() / 1000);
 		const jwtToken = await generateJWT(
-			{
-				auth: true,
-				setupAt: new Date().toISOString(),
-			},
+			createSessionPayload(
+				{
+					sessionVersion,
+					setupAt: new Date(now * 1000).toISOString(),
+				},
+				now,
+			),
 			passwordHash,
-			JWT_EXPIRY_DAYS,
+			sessionPolicy.sessionTtlDays,
 		);
 
-		const expiryDate = new Date(Date.now() + JWT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+		const expiryDate = new Date(now * 1000 + sessionPolicy.sessionTtlSeconds * 1000);
 
 		// 🍪 使用 HttpOnly Cookie 存储 JWT token
 		const securityHeaders = getSecurityHeaders(request);
@@ -555,14 +767,14 @@ export async function handleFirstTimeSetup(request, env) {
 				success: true,
 				message: '密码设置成功，已自动登录',
 				expiresAt: expiryDate.toISOString(),
-				expiresIn: `${JWT_EXPIRY_DAYS}天`,
+				expiresIn: `${sessionPolicy.sessionTtlDays}天`,
 			}),
 			{
 				status: 200,
 				headers: {
 					...securityHeaders,
 					'Content-Type': 'application/json',
-					'Set-Cookie': createSetCookieHeader(jwtToken),
+					'Set-Cookie': createSetCookieHeader(jwtToken, sessionPolicy.sessionTtlSeconds),
 					'X-RateLimit-Limit': rateLimitInfo.limit.toString(),
 					'X-RateLimit-Remaining': rateLimitInfo.remaining.toString(),
 					'X-RateLimit-Reset': rateLimitInfo.resetAt.toString(),
@@ -596,11 +808,15 @@ export async function handleFirstTimeSetup(request, env) {
  */
 export async function handleLogin(request, env) {
 	const logger = getLogger(env);
+	const sessionPolicy = getAuthSessionPolicy(env);
 
 	try {
 		// 🛡️ Rate Limiting: 防止暴力破解
 		const clientIP = getClientIdentifier(request, 'ip');
-		const rateLimitInfo = await checkRateLimit(clientIP, env, RATE_LIMIT_PRESETS.login);
+		const rateLimitInfo = await checkRateLimit(clientIP, env, {
+			...RATE_LIMIT_PRESETS.login,
+			failMode: 'closed',
+		});
 
 		if (!rateLimitInfo.allowed) {
 			logger.warn('登录速率限制超出', {
@@ -645,16 +861,21 @@ export async function handleLogin(request, env) {
 		}
 
 		// 生成 JWT token
+		const sessionVersion = await getAuthSessionVersion(env);
+		const now = Math.floor(Date.now() / 1000);
 		const jwtToken = await generateJWT(
-			{
-				auth: true,
-				loginAt: new Date().toISOString(),
-			},
+			createSessionPayload(
+				{
+					sessionVersion,
+					loginAt: new Date(now * 1000).toISOString(),
+				},
+				now,
+			),
 			storedPasswordHash,
-			JWT_EXPIRY_DAYS,
+			sessionPolicy.sessionTtlDays,
 		);
 
-		const expiryDate = new Date(Date.now() + JWT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+		const expiryDate = new Date(now * 1000 + sessionPolicy.sessionTtlSeconds * 1000);
 		const securityHeaders = getSecurityHeaders(request);
 
 		return new Response(
@@ -662,14 +883,14 @@ export async function handleLogin(request, env) {
 				success: true,
 				message: '登录成功',
 				expiresAt: expiryDate.toISOString(),
-				expiresIn: `${JWT_EXPIRY_DAYS}天`,
+				expiresIn: `${sessionPolicy.sessionTtlDays}天`,
 			}),
 			{
 				status: 200,
 				headers: {
 					...securityHeaders,
 					'Content-Type': 'application/json',
-					'Set-Cookie': createSetCookieHeader(jwtToken),
+					'Set-Cookie': createSetCookieHeader(jwtToken, sessionPolicy.sessionTtlSeconds),
 					'X-RateLimit-Limit': rateLimitInfo.limit.toString(),
 					'X-RateLimit-Remaining': rateLimitInfo.remaining.toString(),
 					'X-RateLimit-Reset': rateLimitInfo.resetAt.toString(),
@@ -708,8 +929,25 @@ export async function handleLogin(request, env) {
  */
 export async function handleRefreshToken(request, env) {
 	const logger = getLogger(env);
+	const sessionPolicy = getAuthSessionPolicy(env);
 
 	try {
+		// 🛡️ 独立限流：防止 refresh 接口被洪泛
+		const clientIP = getClientIdentifier(request, 'ip');
+		const rateLimitInfo = await checkRateLimit(`refresh:${clientIP}`, env, {
+			...RATE_LIMIT_PRESETS.refreshToken,
+			failMode: 'closed',
+		});
+
+		if (!rateLimitInfo.allowed) {
+			logger.warn('刷新令牌速率限制超出', {
+				clientIP,
+				limit: rateLimitInfo.limit,
+				resetAt: rateLimitInfo.resetAt,
+			});
+			return createRateLimitResponse(rateLimitInfo, request);
+		}
+
 		// 优先从 Cookie 获取 token，向后兼容 Authorization header
 		let token = getTokenFromCookie(request);
 
@@ -746,18 +984,39 @@ export async function handleRefreshToken(request, env) {
 			});
 		}
 
+		const currentSessionVersion = await getAuthSessionVersion(env);
+		if (!isSessionVersionValid(payload, currentSessionVersion)) {
+			throw new AuthenticationError('会话已失效，请重新登录', {
+				operation: 'refresh_token',
+				reason: 'session_version_mismatch',
+				currentSessionVersion,
+			});
+		}
+
+		const policyCheck = evaluateSessionPolicy(payload, sessionPolicy);
+		if (!policyCheck.valid) {
+			throw new AuthenticationError('会话已过期，请重新登录', {
+				operation: 'refresh_token',
+				reason: policyCheck.reason,
+			});
+		}
+
 		// 生成新的 JWT token
+		const now = Math.floor(Date.now() / 1000);
 		const newToken = await generateJWT(
-			{
-				auth: true,
-				loginAt: payload.loginAt || new Date().toISOString(),
-				refreshedAt: new Date().toISOString(),
-			},
+			createSessionPayload(
+				{
+					sessionVersion: currentSessionVersion,
+					refreshedAt: new Date(now * 1000).toISOString(),
+				},
+				now,
+				payload,
+			),
 			storedPasswordHash,
-			JWT_EXPIRY_DAYS,
+			sessionPolicy.sessionTtlDays,
 		);
 
-		const expiryDate = new Date(Date.now() + JWT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+		const expiryDate = new Date(now * 1000 + sessionPolicy.sessionTtlSeconds * 1000);
 
 		// 🍪 使用 HttpOnly Cookie 存储刷新后的 JWT token
 		// 🔒 使用安全头（CORS, CSP 等）
@@ -768,7 +1027,7 @@ export async function handleRefreshToken(request, env) {
 				success: true,
 				message: '令牌刷新成功',
 				expiresAt: expiryDate.toISOString(),
-				expiresIn: `${JWT_EXPIRY_DAYS}天`,
+				expiresIn: `${sessionPolicy.sessionTtlDays}天`,
 			}),
 			{
 				status: 200,
@@ -776,7 +1035,10 @@ export async function handleRefreshToken(request, env) {
 					...securityHeaders, // 🔒 包含 CORS, CSP 等安全头
 					'Content-Type': 'application/json',
 					// 🍪 设置新的 HttpOnly Cookie
-					'Set-Cookie': createSetCookieHeader(newToken),
+					'Set-Cookie': createSetCookieHeader(newToken, sessionPolicy.sessionTtlSeconds),
+					'X-RateLimit-Limit': rateLimitInfo.limit.toString(),
+					'X-RateLimit-Remaining': rateLimitInfo.remaining.toString(),
+					'X-RateLimit-Reset': rateLimitInfo.resetAt.toString(),
 				},
 			},
 		);
@@ -805,18 +1067,76 @@ export async function handleRefreshToken(request, env) {
 }
 
 /**
+ * 处理用户主动登出
+ * @param {Request} request - HTTP 请求对象
+ * @param {Object} env - 环境变量对象
+ * @returns {Promise<Response>}
+ */
+export async function handleLogout(request, env) {
+	const logger = getLogger(env);
+
+	try {
+		if (!env.SECRETS_KV) {
+			throw new ConfigurationError('服务器未配置 KV 存储', {
+				missingConfig: 'SECRETS_KV',
+			});
+		}
+
+		const previousVersion = await getAuthSessionVersion(env);
+		const nextVersion = await bumpAuthSessionVersion(env, previousVersion);
+
+		const securityHeaders = getSecurityHeaders(request);
+		logger.info('用户主动登出，已吊销现有会话', {
+			previousVersion,
+			nextVersion,
+		});
+
+		return new Response(
+			JSON.stringify({
+				success: true,
+				message: '已安全退出登录',
+			}),
+			{
+				status: 200,
+				headers: {
+					...securityHeaders,
+					'Content-Type': 'application/json',
+					'Set-Cookie': createClearCookieHeader(),
+				},
+			},
+		);
+	} catch (error) {
+		if (error instanceof ConfigurationError) {
+			logError(error, logger, { operation: 'logout' });
+			return errorToResponse(error, request);
+		}
+
+		logger.error(
+			'登出处理失败',
+			{
+				errorMessage: error.message,
+			},
+			error,
+		);
+		return createErrorResponse('退出失败', '处理退出请求时发生错误', 500, request);
+	}
+}
+
+/**
  * 检查路径是否需要认证
  * @param {string} pathname - 请求路径
+ * @param {Object} env - 环境变量对象（可选）
  * @returns {boolean} 是否需要认证
  */
-export function requiresAuth(pathname) {
+export function requiresAuth(pathname, env = null) {
+	const requireAuthForOtpApi = String(env?.REQUIRE_AUTH_FOR_OTP_API || 'false').toLowerCase() === 'true';
+
 	// 不需要认证的路径
 	const publicPaths = [
 		'/', // 主页（会显示登录界面）
 		'/api/login', // 登录接口
 		'/api/refresh-token', // Token 刷新接口（已在内部验证）
 		'/api/setup', // 首次设置接口
-		'/api/otp/generate', // 安全 OTP 生成接口（POST Body）
 		'/setup', // 设置页面
 		'/manifest.json', // PWA manifest
 		'/sw.js', // Service Worker
@@ -825,6 +1145,11 @@ export function requiresAuth(pathname) {
 		'/favicon.ico', // 网站图标
 		'/otp', // OTP 生成页面（无参数）
 	];
+
+	// 公开 OTP API 可通过环境变量提升为受保护接口
+	if (!requireAuthForOtpApi) {
+		publicPaths.push('/api/otp/generate');
+	}
 
 	// 精确匹配公开路径
 	if (publicPaths.includes(pathname)) {

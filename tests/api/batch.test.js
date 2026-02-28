@@ -71,6 +71,12 @@ function createMockRequest(body = {}, method = 'POST', url = 'https://example.co
   return new Request(url, requestInit);
 }
 
+async function getStoredSecrets(env) {
+  const raw = await env.SECRETS_KV.get('secrets', 'text');
+  const { decryptSecrets } = await import('../../src/utils/encryption.js');
+  return decryptSecrets(raw, env);
+}
+
 describe('Batch Import API Module', () => {
   describe('handleBatchAddSecrets - 批量导入', () => {
     beforeEach(() => {
@@ -114,6 +120,7 @@ describe('Batch Import API Module', () => {
       expect(data.results[0].success).toBe(true);
       expect(data.results[0].secret).toBeDefined();
       expect(data.results[0].secret.id).toBeDefined();
+      expect(data.results[0].secret).not.toHaveProperty('secret');
     });
 
     it('应该处理部分成功的批量导入', async () => {
@@ -251,8 +258,10 @@ describe('Batch Import API Module', () => {
 
       expect(response.status).toBe(200);
       expect(data.successCount).toBe(1);
-      expect(data.results[0].secret.type).toBe('HOTP');
-      expect(data.results[0].secret.counter).toBe(0);
+
+      const storedSecrets = await getStoredSecrets(env);
+      expect(storedSecrets[0].type).toBe('HOTP');
+      expect(storedSecrets[0].counter).toBe(0);
     });
 
     it('应该设置默认值', async () => {
@@ -273,11 +282,12 @@ describe('Batch Import API Module', () => {
 
       expect(response.status).toBe(200);
       expect(data.successCount).toBe(1);
-      const secret = data.results[0].secret;
-      expect(secret.type).toBe('TOTP');
-      expect(secret.digits).toBe(6);
-      expect(secret.period).toBe(30);
-      expect(secret.algorithm).toBe('SHA1');
+
+      const storedSecrets = await getStoredSecrets(env);
+      expect(storedSecrets[0].type).toBe('TOTP');
+      expect(storedSecrets[0].digits).toBe(6);
+      expect(storedSecrets[0].period).toBe(30);
+      expect(storedSecrets[0].algorithm).toBe('SHA1');
     });
 
     it('应该检查重复（同名同账户）', async () => {
@@ -493,10 +503,11 @@ describe('Batch Import API Module', () => {
 
       expect(response.status).toBe(200);
       expect(data.successCount).toBe(1);
-      const secret = data.results[0].secret;
-      expect(secret.digits).toBe(8);
-      expect(secret.period).toBe(60);
-      expect(secret.algorithm).toBe('SHA256');
+
+      const storedSecrets = await getStoredSecrets(env);
+      expect(storedSecrets[0].digits).toBe(8);
+      expect(storedSecrets[0].period).toBe(60);
+      expect(storedSecrets[0].algorithm).toBe('SHA256');
     });
 
     it('应该处理混合成功和失败的场景', async () => {

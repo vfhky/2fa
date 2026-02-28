@@ -202,6 +202,31 @@ export function getAuthCode() {
       }, 1500);
     }
 
+    // 主动退出登录
+    async function logout() {
+      try {
+        await fetch('/api/logout', {
+          method: 'POST',
+          credentials: 'include'
+        });
+      } catch (error) {
+        console.warn('调用登出接口失败，继续执行本地退出流程:', error);
+      }
+
+      clearAuthToken();
+
+      try {
+        localStorage.removeItem('2fa-secrets-cache');
+      } catch (e) {
+        console.warn('清除缓存失败:', e);
+      }
+
+      showCenterToast('✅', '已安全退出登录');
+      setTimeout(() => {
+        showLoginModal();
+      }, 500);
+    }
+
     // 为 fetch 请求添加认证（使用 Cookie）并支持自动续期
     async function authenticatedFetch(url, options = {}) {
       // 🍪 使用 HttpOnly Cookie 进行认证，浏览器自动携带
@@ -217,7 +242,7 @@ export function getAuthCode() {
         // 异步刷新 Token（不阻塞当前请求）
         refreshAuthToken().then(success => {
           if (success) {
-            console.log('✅ Token 自动续期成功，已延长30天');
+            console.log('✅ Token 自动续期成功');
           } else {
             console.warn('⚠️  Token 自动续期失败，请稍后重试');
           }

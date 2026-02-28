@@ -17,6 +17,7 @@ import {
   verifyAuth,
   handleLogin,
   handleRefreshToken,
+  handleLogout,
   checkIfSetupRequired,
   handleFirstTimeSetup,
   requiresAuth,
@@ -120,10 +121,11 @@ function createMockRequest({
 /**
  * 创建 Mock Environment
  */
-function createMockEnv(kvStore = null) {
+function createMockEnv(kvStore = null, vars = {}) {
   return {
     SECRETS_KV: kvStore || new MockKV(),
-    LOG_LEVEL: 'ERROR' // 减少测试日志噪音
+    LOG_LEVEL: 'ERROR', // 减少测试日志噪音
+    ...vars
   };
 }
 
@@ -588,6 +590,281 @@ describe('Auth.js Integration Tests', () => {
       expect(timeDiff).toBeGreaterThan(thirtyDaysMs * 0.9); // 至少27天
       expect(timeDiff).toBeLessThan(thirtyDaysMs * 1.1); // 最多33天
     });
+
+    it('应该对 refresh 接口应用独立限流', async () => {
+      const clientIP = '198.51.100.10';
+      let blocked = null;
+
+      for (let i = 0; i < 21; i++) {
+        const request = createMockRequest({
+          method: 'POST',
+          pathname: '/api/refresh-token',
+          cookies: { auth_token: validToken },
+          headers: {
+            'CF-Connecting-IP': clientIP
+          }
+        });
+
+        const response = await handleRefreshToken(request, env);
+        if (i < 20) {
+          expect(response.status).toBe(200);
+        } else {
+          blocked = response;
+        }
+      }
+
+      expect(blocked).toBeTruthy();
+      expect(blocked.status).toBe(429);
+      const data = await getResponseJson(blocked);
+      expect(data.error).toContain('请求过于频繁');
+    });
+
+    it('refresh 限流计数应与登录限流隔离', async () => {
+      const clientIP = '198.51.100.11';
+
+      for (let i = 0; i < 6; i++) {
+        const loginRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/login',
+          body: { credential: 'WrongPassword123!' },
+          headers: {
+            'CF-Connecting-IP': clientIP
+          }
+        });
+        await handleLogin(loginRequest, env);
+      }
+
+      const refreshRequest = createMockRequest({
+        method: 'POST',
+        pathname: '/api/refresh-token',
+        cookies: { auth_token: validToken },
+        headers: {
+          'CF-Connecting-IP': clientIP
+        }
+      });
+
+      const refreshResponse = await handleRefreshToken(refreshRequest, env);
+      expect(refreshResponse.status).toBe(200);
+    });
+
+    it('刷新后应保留 origIat 并更新 lastActiveAt', async () => {
+      const oldPayload = JSON.parse(atob(validToken.split('.')[1]));
+
+      const request = createMockRequest({
+        method: 'POST',
+        pathname: '/api/refresh-token',
+        cookies: { auth_token: validToken }
+      });
+
+      const response = await handleRefreshToken(request, env);
+      expect(response.status).toBe(200);
+
+      const refreshedToken = extractCookie(response, 'auth_token');
+      expect(refreshedToken).toBeDefined();
+
+      const newPayload = JSON.parse(atob(refreshedToken.split('.')[1]));
+      expect(newPayload.origIat).toBe(oldPayload.origIat);
+      expect(newPayload.lastActiveAt).toBeGreaterThanOrEqual(oldPayload.lastActiveAt);
+      expect(newPayload.sessionVersion).toBe(oldPayload.sessionVersion);
+    });
+
+    it('超过绝对会话上限后应拒绝刷新', async () => {
+      vi.useFakeTimers();
+      try {
+        const baseTime = new Date('2026-01-01T00:00:00.000Z');
+        vi.setSystemTime(baseTime);
+
+        const localKv = new MockKV();
+        const localEnv = createMockEnv(localKv, {
+          AUTH_ABSOLUTE_TTL_DAYS: '1',
+          AUTH_SESSION_TTL_DAYS: '30',
+          AUTH_IDLE_TIMEOUT_MINUTES: '120'
+        });
+
+        const setupRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/setup',
+          body: { password: testPassword, confirmPassword: testPassword }
+        });
+        await handleFirstTimeSetup(setupRequest, localEnv);
+
+        const loginRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/login',
+          body: { credential: testPassword }
+        });
+        const loginResponse = await handleLogin(loginRequest, localEnv);
+        const token = extractCookie(loginResponse, 'auth_token');
+        expect(token).toBeDefined();
+
+        vi.setSystemTime(new Date(baseTime.getTime() + 2 * 24 * 60 * 60 * 1000));
+
+        const refreshRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/refresh-token',
+          cookies: { auth_token: token }
+        });
+        const refreshResponse = await handleRefreshToken(refreshRequest, localEnv);
+        expect(refreshResponse.status).toBe(401);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('超过空闲超时后应拒绝认证', async () => {
+      vi.useFakeTimers();
+      try {
+        const baseTime = new Date('2026-01-01T00:00:00.000Z');
+        vi.setSystemTime(baseTime);
+
+        const localKv = new MockKV();
+        const localEnv = createMockEnv(localKv, {
+          AUTH_IDLE_TIMEOUT_MINUTES: '1',
+          AUTH_ABSOLUTE_TTL_DAYS: '30',
+          AUTH_SESSION_TTL_DAYS: '30'
+        });
+
+        const setupRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/setup',
+          body: { password: testPassword, confirmPassword: testPassword }
+        });
+        await handleFirstTimeSetup(setupRequest, localEnv);
+
+        const loginRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/login',
+          body: { credential: testPassword }
+        });
+        const loginResponse = await handleLogin(loginRequest, localEnv);
+        const token = extractCookie(loginResponse, 'auth_token');
+        expect(token).toBeDefined();
+
+        vi.setSystemTime(new Date(baseTime.getTime() + 61 * 1000));
+
+        const authRequest = createMockRequest({
+          pathname: '/api/secrets',
+          cookies: { auth_token: token }
+        });
+        const isAuthorized = await verifyAuth(authRequest, localEnv);
+        expect(isAuthorized).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('登出流程集成', () => {
+    let kvStore;
+    let env;
+    const testPassword = 'LogoutPassword123!';
+    let token;
+
+    beforeEach(async () => {
+      kvStore = new MockKV();
+      env = createMockEnv(kvStore);
+
+      const setupRequest = createMockRequest({
+        method: 'POST',
+        pathname: '/api/setup',
+        body: { password: testPassword, confirmPassword: testPassword }
+      });
+      await handleFirstTimeSetup(setupRequest, env);
+
+      const loginRequest = createMockRequest({
+        method: 'POST',
+        pathname: '/api/login',
+        body: { credential: testPassword }
+      });
+      const loginResponse = await handleLogin(loginRequest, env);
+      token = extractCookie(loginResponse, 'auth_token');
+    });
+
+    it('应返回清理 Cookie 的响应头', async () => {
+      const request = createMockRequest({
+        method: 'POST',
+        pathname: '/api/logout',
+        cookies: { auth_token: token }
+      });
+
+      const response = await handleLogout(request, env);
+      expect(response.status).toBe(200);
+
+      const setCookieHeader = response.headers.get('Set-Cookie');
+      expect(setCookieHeader).toContain('auth_token=');
+      expect(setCookieHeader).toContain('Max-Age=0');
+    });
+
+    it('登出后旧 token 应立即失效', async () => {
+      const beforeLogoutRequest = createMockRequest({
+        pathname: '/api/secrets',
+        cookies: { auth_token: token }
+      });
+      expect(await verifyAuth(beforeLogoutRequest, env)).toBe(true);
+
+      const logoutRequest = createMockRequest({
+        method: 'POST',
+        pathname: '/api/logout',
+        cookies: { auth_token: token }
+      });
+      const logoutResponse = await handleLogout(logoutRequest, env);
+      expect(logoutResponse.status).toBe(200);
+
+      const afterLogoutRequest = createMockRequest({
+        pathname: '/api/secrets',
+        cookies: { auth_token: token }
+      });
+      expect(await verifyAuth(afterLogoutRequest, env)).toBe(false);
+    });
+
+    it('登出后旧 token 的 refresh 请求应被拒绝', async () => {
+      const logoutRequest = createMockRequest({
+        method: 'POST',
+        pathname: '/api/logout',
+        cookies: { auth_token: token }
+      });
+      await handleLogout(logoutRequest, env);
+
+      const refreshRequest = createMockRequest({
+        method: 'POST',
+        pathname: '/api/refresh-token',
+        cookies: { auth_token: token }
+      });
+
+      const refreshResponse = await handleRefreshToken(refreshRequest, env);
+      expect(refreshResponse.status).toBe(401);
+    });
+
+    it('登出后重新登录应签发新会话版本 token', async () => {
+      const oldPayload = JSON.parse(atob(token.split('.')[1]));
+
+      const logoutRequest = createMockRequest({
+        method: 'POST',
+        pathname: '/api/logout',
+        cookies: { auth_token: token }
+      });
+      await handleLogout(logoutRequest, env);
+
+      const reloginRequest = createMockRequest({
+        method: 'POST',
+        pathname: '/api/login',
+        body: { credential: testPassword }
+      });
+      const reloginResponse = await handleLogin(reloginRequest, env);
+      expect(reloginResponse.status).toBe(200);
+
+      const newToken = extractCookie(reloginResponse, 'auth_token');
+      expect(newToken).toBeDefined();
+      const newPayload = JSON.parse(atob(newToken.split('.')[1]));
+
+      expect(newPayload.sessionVersion).toBeGreaterThan(oldPayload.sessionVersion);
+
+      const authRequest = createMockRequest({
+        pathname: '/api/secrets',
+        cookies: { auth_token: newToken }
+      });
+      expect(await verifyAuth(authRequest, env)).toBe(true);
+    });
   });
 
   describe('路由认证集成 (requiresAuth)', () => {
@@ -597,6 +874,7 @@ describe('Auth.js Integration Tests', () => {
         '/api/login',
         '/api/refresh-token',
         '/api/setup',
+        '/api/otp/generate',
         '/setup',
         '/manifest.json',
         '/sw.js',
@@ -611,6 +889,10 @@ describe('Auth.js Integration Tests', () => {
       }
     });
 
+    it('启用 REQUIRE_AUTH_FOR_OTP_API 时应保护 OTP API', () => {
+      expect(requiresAuth('/api/otp/generate', { REQUIRE_AUTH_FOR_OTP_API: 'true' })).toBe(true);
+    });
+
     it('应该正确识别受保护路由', () => {
       const protectedRoutes = [
         '/api/secrets',
@@ -619,6 +901,7 @@ describe('Auth.js Integration Tests', () => {
         '/api/backup',
         '/api/backup/restore',
         '/api/backup/export/backup-123',
+        '/api/logout',
         '/admin',
         '/settings'
       ];

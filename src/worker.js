@@ -20,6 +20,9 @@ import { ensureEncryptionConfigured } from './utils/encryption.js';
 import { getLogger, createRequestLogger, PerformanceTimer, sanitizeUrlForLog } from './utils/logger.js';
 import { getMonitoring, ErrorSeverity } from './utils/monitoring.js';
 import { KV_KEYS } from './utils/constants.js';
+import { getSecurityHeaders } from './utils/security.js';
+import { buildBackupMetadata } from './utils/backupMetadata.js';
+import { getBackupRetentionConfig } from './utils/backup.js';
 
 /**
  * 获取所有密钥
@@ -221,11 +224,24 @@ export async function saveDataHash(env, secrets) {
 }
 
 /**
- * 清理旧备份文件（保留最新100个备份）
+ * 清理旧备份文件（保留数量可配置）
  * @param {Object} env - 环境变量对象
  */
 async function cleanupOldBackups(env) {
 	const logger = getLogger(env);
+	const retentionConfig = getBackupRetentionConfig(env);
+	const maxBackups = retentionConfig.maxBackups;
+	const autoCleanupEnabled = retentionConfig.autoCleanupEnabled;
+
+	if (!autoCleanupEnabled) {
+		logger.debug('自动清理已禁用，跳过旧备份清理');
+		return;
+	}
+
+	if (maxBackups === 0) {
+		logger.debug('备份保留数量不限制（BACKUP_MAX_BACKUPS=0），跳过旧备份清理');
+		return;
+	}
 
 	try {
 		const list = await env.SECRETS_KV.list();
@@ -235,10 +251,10 @@ async function cleanupOldBackups(env) {
 			totalBackups: backupKeys.length,
 		});
 
-		if (backupKeys.length <= 100) {
+		if (backupKeys.length <= maxBackups) {
 			logger.debug('备份文件数量正常', {
 				current: backupKeys.length,
-				max: 100,
+				max: maxBackups,
 			});
 			return;
 		}
@@ -246,9 +262,9 @@ async function cleanupOldBackups(env) {
 		// 按文件名排序（文件名包含日期，最新的在前）
 		backupKeys.sort((a, b) => b.name.localeCompare(a.name));
 
-		// 保留最新的100个备份，删除其余的
-		const keysToKeep = backupKeys.slice(0, 100);
-		const keysToDelete = backupKeys.slice(100);
+		// 保留最新的 maxBackups 个备份，删除其余的
+		const keysToKeep = backupKeys.slice(0, maxBackups);
+		const keysToDelete = backupKeys.slice(maxBackups);
 
 		logger.info('开始清理旧备份', {
 			toKeep: keysToKeep.length,
@@ -367,6 +383,7 @@ export default {
 				{
 					status: 500,
 					headers: {
+						...getSecurityHeaders(request),
 						'Content-Type': 'application/json',
 						'X-Error-Id': errorInfo.errorId,
 					},
@@ -483,8 +500,16 @@ export default {
 				});
 			}
 
-			// 存储备份到KV
-			await env.SECRETS_KV.put(backupKey, backupContent);
+			// 存储备份到KV（写入 metadata 便于列表快速读取）
+			await env.SECRETS_KV.put(backupKey, backupContent, {
+				metadata: buildBackupMetadata({
+					timestamp: backupData.timestamp,
+					count: secrets.length,
+					encrypted: isEncrypted,
+					size: backupContent.length,
+					reason: 'scheduled',
+				}),
+			});
 			timer.checkpoint('备份已保存');
 
 			logger.info('自动备份完成', {
@@ -498,7 +523,7 @@ export default {
 			await saveDataHash(env, secrets);
 			timer.checkpoint('哈希已更新');
 
-			// 清理旧备份（保留最新100个备份）
+			// 清理旧备份（保留数量由 BACKUP_MAX_BACKUPS 控制）
 			logger.debug('清理旧备份文件');
 			await cleanupOldBackups(env);
 			timer.checkpoint('清理完成');

@@ -24,8 +24,9 @@ class MockKV {
   }
 
   async get(key, type = 'text') {
-    const value = this.store.get(key);
-    if (!value) return null;
+    const entry = this.store.get(key);
+    if (!entry) return null;
+    const value = entry.value;
 
     if (type === 'json') {
       return JSON.parse(value);
@@ -34,7 +35,10 @@ class MockKV {
   }
 
   async put(key, value, options = {}) {
-    this.store.set(key, value);
+    this.store.set(key, {
+      value,
+      metadata: options.metadata
+    });
   }
 
   async delete(key) {
@@ -56,7 +60,7 @@ class MockKV {
     return {
       keys: pageKeys.map(name => ({
         name,
-        metadata: { created: new Date().toISOString() }
+        metadata: this.store.get(name)?.metadata
       })),
       list_complete: startIndex + limit >= filteredKeys.length,
       cursor: (startIndex + limit < filteredKeys.length) ? String(startIndex + limit) : undefined
@@ -295,7 +299,7 @@ describe('Backup API Module', () => {
       expect(data.pagination.limit).toBe(2);
     });
 
-    it('应该支持简单模式（不获取详情）', async () => {
+    it('应该支持简单模式（不读取备份内容）', async () => {
       const env = createMockEnv();
 
       await saveSecretsToKV(env, [
@@ -311,12 +315,12 @@ describe('Backup API Module', () => {
       expect(response.status).toBe(200);
       expect(data.backups.length).toBeGreaterThan(0);
 
-      // 简单模式不应该包含 count 和 encrypted
+      // 简单模式仍可返回 metadata 中的轻量字段
       const backup = data.backups[0];
       expect(backup.key).toBeDefined();
       expect(backup.created).toBeDefined();
-      expect(backup.count).toBeUndefined();
-      expect(backup.encrypted).toBeUndefined();
+      expect(backup.count).toBe(1);
+      expect(backup.encrypted).toBe(true);
     });
 
     it('应该正确处理加密和明文备份混合', async () => {
@@ -403,6 +407,41 @@ describe('Backup API Module', () => {
       expect(data.pagination).toBeDefined();
       expect(data.pagination.loadedAll).toBe(true);
       expect(data.pagination.hasMore).toBe(false);
+      expect(data.performanceGuard?.triggered).toBe(true);
+      expect(data.performanceGuard?.mode).toBe('all-details-disabled');
+    });
+
+    it('开启 ALLOW_ALL_BACKUP_DETAILS 后应允许全量详情模式', async () => {
+      const env = createMockEnv();
+      env.ALLOW_ALL_BACKUP_DETAILS = 'true';
+
+      const backupData = {
+        timestamp: new Date().toISOString(),
+        version: '1.0',
+        count: 1,
+        secrets: [{ id: '1', name: 'Test', secret: 'JBSWY3DPEHPK3PXP' }]
+      };
+      const backupKey = 'backup_2026-01-01_00-00-00.json';
+      await env.SECRETS_KV.put(backupKey, JSON.stringify(backupData), {
+        metadata: {
+          created: '2026-01-01T00:00:00.000Z',
+          count: 1,
+          encrypted: false,
+          size: JSON.stringify(backupData).length
+        }
+      });
+
+      const request = createMockRequest({}, 'GET', 'https://example.com/api/backup', {
+        limit: 'all',
+        details: 'true'
+      });
+      const response = await handleGetBackups(request, env);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.performanceGuard?.triggered).toBe(false);
+      expect(data.backups[0].count).toBe(1);
+      expect(data.backups[0].encrypted).toBe(false);
     });
 
     it('应该支持 limit=0 加载所有备份（与 limit=all 相同）', async () => {
@@ -433,6 +472,49 @@ describe('Backup API Module', () => {
       expect(response.status).toBe(200);
       expect(data.backups.length).toBe(10);
       expect(data.pagination.loadedAll).toBe(true);
+    });
+
+    it('详情模式超过阈值时应截断并标记 detailSkipped', async () => {
+      const env = createMockEnv();
+      env.ALLOW_ALL_BACKUP_DETAILS = 'true';
+      env.BACKUP_DETAILS_MAX_ITEMS = '2';
+      env.BACKUP_DETAILS_CONCURRENCY = '1';
+
+      for (let i = 0; i < 5; i++) {
+        const date = new Date(Date.now() + i * 1000);
+        const dateStr = date.toISOString().split('T')[0];
+        const timeStr = date.toISOString().split('T')[1].split('.')[0].replace(/:/g, '-');
+        const backupKey = `backup_${dateStr}_${timeStr}.json`;
+        const backupData = {
+          timestamp: date.toISOString(),
+          version: '1.0',
+          count: 1,
+          secrets: [{ id: String(i), name: `Test${i}`, secret: 'JBSWY3DPEHPK3PXP' }]
+        };
+
+        await env.SECRETS_KV.put(backupKey, JSON.stringify(backupData), {
+          metadata: {
+            created: date.toISOString(),
+            count: 1,
+            encrypted: false,
+            size: JSON.stringify(backupData).length
+          }
+        });
+      }
+
+      const request = createMockRequest({}, 'GET', 'https://example.com/api/backup', {
+        limit: 'all',
+        details: 'true'
+      });
+      const response = await handleGetBackups(request, env);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.performanceGuard?.triggered).toBe(true);
+      expect(data.performanceGuard?.mode).toBe('details-truncated');
+      expect(data.backups.length).toBe(5);
+      const skippedItems = data.backups.filter((item) => item.detailSkipped === true);
+      expect(skippedItems.length).toBe(3);
     });
 
     it('应该支持更大的 limit 值（最大1000）', async () => {

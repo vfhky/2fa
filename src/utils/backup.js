@@ -6,7 +6,7 @@
  * 1. 数据变化时立即触发备份（事件驱动）
  * 2. 使用防抖机制，避免频繁备份（5分钟内只备份一次）
  * 3. 保留定时备份作为兜底（每10分钟检查一次）
- * 4. 自动清理旧备份（默认保留最新100个，超过后自动删除最早的备份）
+ * 4. 自动清理旧备份（默认保留最新100个，可通过 BACKUP_MAX_BACKUPS 调整）
  *
  * 配置选项（BACKUP_CONFIG）：
  * - MAX_BACKUPS: 最大保留备份数（默认100，设置为0表示不限制）
@@ -21,6 +21,51 @@
 import { encryptData, ensureEncryptionConfigured } from './encryption.js';
 import { getLogger } from './logger.js';
 import { getMonitoring } from './monitoring.js';
+import { buildBackupMetadata } from './backupMetadata.js';
+
+const DEFAULT_MAX_BACKUPS = 100;
+
+function parseBooleanEnv(value, fallback) {
+	if (value === undefined || value === null || value === '') {
+		return fallback;
+	}
+
+	const normalized = String(value).trim().toLowerCase();
+	if (normalized === 'true') {
+		return true;
+	}
+	if (normalized === 'false') {
+		return false;
+	}
+	return fallback;
+}
+
+function parseBackupLimit(value, fallback) {
+	if (value === undefined || value === null || value === '') {
+		return fallback;
+	}
+
+	const parsed = Number.parseInt(String(value), 10);
+	if (!Number.isFinite(parsed) || parsed < 0) {
+		return fallback;
+	}
+	return parsed;
+}
+
+/**
+ * 获取备份保留策略配置（统一用于 worker 与 backup manager）
+ * @param {Object} env - 环境变量对象
+ * @returns {{maxBackups: number, autoCleanupEnabled: boolean}}
+ */
+export function getBackupRetentionConfig(env = {}) {
+	const maxBackups = parseBackupLimit(env?.BACKUP_MAX_BACKUPS, BACKUP_CONFIG.MAX_BACKUPS);
+	const autoCleanupEnabled = parseBooleanEnv(env?.BACKUP_AUTO_CLEANUP_ENABLED, BACKUP_CONFIG.AUTO_CLEANUP_ENABLED);
+
+	return {
+		maxBackups,
+		autoCleanupEnabled,
+	};
+}
 
 /**
  * 备份配置
@@ -31,7 +76,7 @@ const BACKUP_CONFIG = {
 
 	// 最大保留备份数（默认100，可通过环境变量覆盖）
 	// 设置为 0 表示不限制（禁用自动清理）
-	MAX_BACKUPS: 100,
+	MAX_BACKUPS: DEFAULT_MAX_BACKUPS,
 
 	// 是否启用自动清理旧备份（默认true，可通过环境变量覆盖）
 	AUTO_CLEANUP_ENABLED: true,
@@ -173,8 +218,16 @@ class BackupManager {
 				this.logger.warn('⚠️ 备份数据以明文保存（未配置 ENCRYPTION_KEY）');
 			}
 
-			// 存储备份
-			await this.env.SECRETS_KV.put(backupKey, backupContent);
+			// 存储备份（写入 metadata 以支持列表快速读取）
+			await this.env.SECRETS_KV.put(backupKey, backupContent, {
+				metadata: buildBackupMetadata({
+					timestamp: backupData.timestamp,
+					count: secrets.length,
+					encrypted: isEncrypted,
+					size: backupContent.length,
+					reason,
+				}),
+			});
 
 			const duration = Date.now() - startTime;
 			this.lastBackupTime = Date.now();
@@ -250,15 +303,19 @@ class BackupManager {
 	 * @private
 	 */
 	async _cleanupOldBackupsAsync() {
+		const retentionConfig = getBackupRetentionConfig(this.env);
+		const maxBackups = retentionConfig.maxBackups;
+		const autoCleanupEnabled = retentionConfig.autoCleanupEnabled;
+
 		// 检查是否启用自动清理
-		if (!BACKUP_CONFIG.AUTO_CLEANUP_ENABLED) {
+		if (!autoCleanupEnabled) {
 			this.logger.debug('⏭️ 自动清理已禁用，跳过');
 			return;
 		}
 
 		// 检查是否设置了备份限制（0表示不限制）
-		if (BACKUP_CONFIG.MAX_BACKUPS === 0) {
-			this.logger.debug('⏭️ 备份数量不限制（MAX_BACKUPS=0），跳过清理');
+		if (maxBackups === 0) {
+			this.logger.debug('⏭️ 备份数量不限制（BACKUP_MAX_BACKUPS=0），跳过清理');
 			return;
 		}
 
@@ -268,10 +325,10 @@ class BackupManager {
 
 			this.logger.debug('🔍 检查备份文件', { count: backupKeys.length });
 
-			if (backupKeys.length <= BACKUP_CONFIG.MAX_BACKUPS) {
+			if (backupKeys.length <= maxBackups) {
 				this.logger.debug('✅ 备份文件数量正常', {
 					current: backupKeys.length,
-					max: BACKUP_CONFIG.MAX_BACKUPS,
+					max: maxBackups,
 				});
 				return;
 			}
@@ -280,12 +337,12 @@ class BackupManager {
 			backupKeys.sort((a, b) => b.name.localeCompare(a.name));
 
 			// 保留最新的备份，删除其余的
-			const keysToDelete = backupKeys.slice(BACKUP_CONFIG.MAX_BACKUPS);
+			const keysToDelete = backupKeys.slice(maxBackups);
 
 			this.logger.info('🧹 开始清理旧备份', {
 				totalBackups: backupKeys.length,
 				toDelete: keysToDelete.length,
-				toKeep: BACKUP_CONFIG.MAX_BACKUPS,
+				toKeep: maxBackups,
 			});
 
 			// 批量删除（避免阻塞太久）
@@ -299,7 +356,7 @@ class BackupManager {
 
 			this.logger.info('✅ 旧备份清理完成', {
 				deleted: keysToDelete.length,
-				remaining: BACKUP_CONFIG.MAX_BACKUPS,
+				remaining: maxBackups,
 			});
 		} catch (error) {
 			this.logger.error('清理旧备份失败', {}, error);

@@ -6,26 +6,32 @@
 
 import { getStyles } from './styles/index.js';
 import { getScripts, getCoreScripts } from './scripts/index.js';
+import { createHtmlResponse } from '../utils/response.js';
 
 /**
  * 创建主页面（密钥管理界面）
- * @param {Object} options - 配置选项
+ * @param {Request|Object} requestOrOptions - HTTP请求对象或配置选项
+ * @param {Object} maybeOptions - 配置选项
  * @param {boolean} options.lazyLoad - 是否启用懒加载（默认true）
  * @returns {Response} HTML响应
  */
-export async function createMainPage(options = {}) {
+export async function createMainPage(requestOrOptions = {}, maybeOptions = {}) {
+	const isRequest =
+		requestOrOptions &&
+		typeof requestOrOptions === 'object' &&
+		typeof requestOrOptions.method === 'string' &&
+		typeof requestOrOptions.url === 'string';
+	const request = isRequest ? requestOrOptions : null;
+	const options = isRequest ? maybeOptions : requestOrOptions;
 	const { lazyLoad = true } = options;
 
 	// 构建完整的HTML内容
 	const html = buildCompleteHTML(lazyLoad);
 
-	return new Response(html, {
-		headers: {
-			'Content-Type': 'text/html',
-			'Cache-Control': 'no-cache, no-store, must-revalidate',
-			Pragma: 'no-cache',
-			Expires: '0',
-		},
+	return createHtmlResponse(html, 200, request, {
+		'Cache-Control': 'no-cache, no-store, must-revalidate',
+		Pragma: 'no-cache',
+		Expires: '0',
 	});
 }
 
@@ -1291,6 +1297,10 @@ function getHTMLBody() {
       <div class="submenu-item" onclick="showToolsModal(); closeActionMenu();">
         <span class="item-icon">🔧</span>
         <span class="item-text">实用工具</span>
+      </div>
+      <div class="submenu-item submenu-item-danger" onclick="logout(); closeActionMenu();">
+        <span class="item-icon">🔓</span>
+        <span class="item-text">退出登录</span>
       </div>
     </div>
   </div>

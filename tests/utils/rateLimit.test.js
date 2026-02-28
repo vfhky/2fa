@@ -180,6 +180,48 @@ describe('Rate Limiting Utils', () => {
       expect(result.remaining).toBe(5);
     });
 
+    it('failMode=closed 时，KV 错误应该拒绝请求', async () => {
+      const env = {
+        SECRETS_KV: {
+          get: vi.fn().mockRejectedValue(new Error('KV error')),
+          put: vi.fn()
+        },
+        LOG_LEVEL: 'ERROR'
+      };
+
+      const result = await checkRateLimit('test-client', env, {
+        maxAttempts: 5,
+        windowSeconds: 60,
+        failMode: 'closed'
+      });
+
+      expect(result.allowed).toBe(false);
+      expect(result.remaining).toBe(0);
+      expect(result.limit).toBe(5);
+      expect(result.resetAt).toBeGreaterThan(Date.now());
+    });
+
+    it('固定窗口在 failMode=closed 时也应该拒绝请求', async () => {
+      const env = {
+        SECRETS_KV: {
+          get: vi.fn().mockRejectedValue(new Error('KV error')),
+          put: vi.fn()
+        },
+        LOG_LEVEL: 'ERROR'
+      };
+
+      const result = await checkRateLimit('test-client', env, {
+        maxAttempts: 3,
+        windowSeconds: 60,
+        algorithm: 'fixed-window',
+        failMode: 'closed'
+      });
+
+      expect(result.allowed).toBe(false);
+      expect(result.remaining).toBe(0);
+      expect(result.algorithm).toBe('fixed-window');
+    });
+
     it('resetAt 时间应该正确计算', async () => {
       const env = createMockEnv();
       const windowSeconds = 120; // 2 分钟

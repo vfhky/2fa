@@ -43,12 +43,13 @@ function createMockRequest(options = {}) {
 /**
  * 创建 Mock Response
  */
-function createMockResponse(status = 200, statusText = 'OK') {
+function createMockResponse(status = 200, statusText = 'OK', headers = {}) {
   return {
     status,
     statusText,
     headers: new Headers({
-      'content-type': 'application/json'
+      'content-type': 'application/json',
+      ...headers
     })
   };
 }
@@ -219,7 +220,8 @@ describe('Logger System', () => {
         'content-type': 'application/json',
         'authorization': 'Bearer token123',
         'cookie': 'session=abc',
-        'x-api-key': 'secret-key'
+        'x-api-key': 'secret-key',
+        'set-cookie': 'auth_token=jwt.token.value'
       });
 
       const sanitized = logger._sanitizeHeaders(headers);
@@ -228,6 +230,7 @@ describe('Logger System', () => {
       expect(sanitized['authorization']).toBe('***REDACTED***');
       expect(sanitized['cookie']).toBe('***REDACTED***');
       expect(sanitized['x-api-key']).toBe('***REDACTED***');
+      expect(sanitized['set-cookie']).toBe('***REDACTED***');
     });
 
     it('应该保留非敏感头', () => {
@@ -736,7 +739,9 @@ describe('Logger System', () => {
       const logger = new Logger();
       const requestLogger = createRequestLogger(logger);
       const timer = new PerformanceTimer('Test', logger);
-      const response = createMockResponse(200, 'OK');
+      const response = createMockResponse(200, 'OK', {
+        'set-cookie': 'auth_token=jwt.token.value; HttpOnly; Secure'
+      });
 
       requestLogger.logResponse(timer, response);
 
@@ -744,7 +749,10 @@ describe('Logger System', () => {
         expect.stringContaining('Response sent'),
         expect.objectContaining({
           status: 200,
-          statusText: 'OK'
+          statusText: 'OK',
+          headers: expect.objectContaining({
+            'set-cookie': '***REDACTED***'
+          })
         })
       );
     });

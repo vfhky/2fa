@@ -36,8 +36,8 @@ export function getBackupCode() {
       backupSelectElement.disabled = true;
 
       try {
-        // 加载所有备份（不限数量）
-        const response = await authenticatedFetch('/api/backup?limit=all');
+	        // 加载所有备份（不限数量，列表页使用轻量模式避免高开销）
+	        const response = await authenticatedFetch('/api/backup?limit=all&details=false');
         if (!response.ok) {
           throw new Error('获取备份列表失败');
         }

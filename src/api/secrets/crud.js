@@ -79,7 +79,7 @@ export async function handleGetSecrets(requestOrEnv, maybeEnv = null) {
 		if (monitoring && monitoring.getErrorMonitor) {
 			monitoring.getErrorMonitor().captureError(error, { operation: 'handleGetSecrets' }, ErrorSeverity.ERROR);
 		}
-		return createErrorResponse('获取密钥列表失败', `从存储中获取密钥时发生错误: ${error.message}`, 500, request);
+		return createErrorResponse('获取密钥列表失败', '从存储中获取密钥时发生内部错误，请稍后重试', 500, request);
 	}
 }
 
@@ -294,7 +294,10 @@ export async function handleDeleteSecret(request, env) {
 	try {
 		// Rate Limiting: 敏感操作限流
 		const clientIP = getClientIdentifier(request, 'ip');
-		const rateLimitInfo = await checkRateLimit(clientIP, env, RATE_LIMIT_PRESETS.sensitive);
+		const rateLimitInfo = await checkRateLimit(clientIP, env, {
+			...RATE_LIMIT_PRESETS.sensitive,
+			failMode: 'closed',
+		});
 
 		if (!rateLimitInfo.allowed) {
 			logger.warn('删除密钥被限流', { clientIP, operation: 'handleDeleteSecret' });

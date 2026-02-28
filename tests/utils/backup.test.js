@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   BackupManager,
   BACKUP_CONFIG,
+  getBackupRetentionConfig,
   getBackupManager,
   triggerBackup,
   executeImmediateBackup
@@ -99,6 +100,31 @@ describe('Backup System', () => {
       expect(BACKUP_CONFIG.MAX_BACKUPS).toBe(100);
       expect(BACKUP_CONFIG.EVENT_DRIVEN_ENABLED).toBe(true);
       expect(BACKUP_CONFIG.SCHEDULED_BACKUP_ENABLED).toBe(true);
+    });
+
+    it('应该从环境变量读取备份保留数量', () => {
+      const config = getBackupRetentionConfig({
+        BACKUP_MAX_BACKUPS: '20'
+      });
+
+      expect(config.maxBackups).toBe(20);
+      expect(config.autoCleanupEnabled).toBe(true);
+    });
+
+    it('BACKUP_MAX_BACKUPS=0 时应表示不限制', () => {
+      const config = getBackupRetentionConfig({
+        BACKUP_MAX_BACKUPS: '0'
+      });
+
+      expect(config.maxBackups).toBe(0);
+    });
+
+    it('非法 BACKUP_MAX_BACKUPS 应回退默认值', () => {
+      const config = getBackupRetentionConfig({
+        BACKUP_MAX_BACKUPS: '-1'
+      });
+
+      expect(config.maxBackups).toBe(100);
     });
   });
 

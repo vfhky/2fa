@@ -2,12 +2,14 @@
  * 首次设置页面模块
  * 用于用户首次访问时设置管理员密码
  */
+import { createHtmlResponse } from '../utils/response.js';
 
 /**
  * 创建首次设置页面
+ * @param {Request} request - HTTP请求对象（可选）
  * @returns {Response} HTML响应
  */
-export async function createSetupPage() {
+export async function createSetupPage(request = null) {
 	const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -558,12 +560,9 @@ export async function createSetupPage() {
 </body>
 </html>`;
 
-	return new Response(html, {
-		headers: {
-			'Content-Type': 'text/html; charset=utf-8',
-			'Cache-Control': 'no-cache, no-store, must-revalidate',
-			Pragma: 'no-cache',
-			Expires: '0',
-		},
+	return createHtmlResponse(html, 200, request, {
+		'Cache-Control': 'no-cache, no-store, must-revalidate',
+		Pragma: 'no-cache',
+		Expires: '0',
 	});
 }

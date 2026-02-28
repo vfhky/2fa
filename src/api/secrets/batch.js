@@ -36,7 +36,10 @@ export async function handleBatchAddSecrets(request, env) {
 	try {
 		// 🛡️ Rate Limiting: 防止批量操作滥用
 		const clientIP = getClientIdentifier(request, 'ip');
-		const rateLimitInfo = await checkRateLimit(clientIP, env, RATE_LIMIT_PRESETS.bulk);
+		const rateLimitInfo = await checkRateLimit(clientIP, env, {
+			...RATE_LIMIT_PRESETS.bulk,
+			failMode: 'closed',
+		});
 
 		if (!rateLimitInfo.allowed) {
 			logger.warn('批量添加速率限制超出', {
@@ -111,14 +114,19 @@ export async function handleBatchAddSecrets(request, env) {
 				results.push({
 					index: i,
 					success: true,
-					secret: newSecret,
+					secret: {
+						id: newSecret.id,
+						name: newSecret.name,
+						account: newSecret.account || '',
+						type: newSecret.type,
+					},
 				});
 				successCount++;
-			} catch (error) {
+			} catch {
 				results.push({
 					index: i,
 					success: false,
-					error: error.message,
+					error: '处理失败，请检查输入格式',
 				});
 				failCount++;
 			}
@@ -161,7 +169,7 @@ export async function handleBatchAddSecrets(request, env) {
 			},
 			error,
 		);
-		return createErrorResponse('批量导入失败', `批量导入密钥时发生内部错误：${error.message}`, 500, request);
+		return createErrorResponse('批量导入失败', '批量导入密钥时发生内部错误，请稍后重试', 500, request);
 	}
 }
 
@@ -185,7 +193,10 @@ export async function handleBatchDeleteSecrets(request, env) {
 	try {
 		// 🛡️ Rate Limiting: 防止批量操作滥用
 		const clientIP = getClientIdentifier(request, 'ip');
-		const rateLimitInfo = await checkRateLimit(clientIP, env, RATE_LIMIT_PRESETS.bulk);
+		const rateLimitInfo = await checkRateLimit(clientIP, env, {
+			...RATE_LIMIT_PRESETS.bulk,
+			failMode: 'closed',
+		});
 
 		if (!rateLimitInfo.allowed) {
 			logger.warn('批量删除速率限制超出', {
@@ -297,6 +308,6 @@ export async function handleBatchDeleteSecrets(request, env) {
 			},
 			error,
 		);
-		return createErrorResponse('批量删除失败', `批量删除密钥时发生内部错误：${error.message}`, 500, request);
+		return createErrorResponse('批量删除失败', '批量删除密钥时发生内部错误，请稍后重试', 500, request);
 	}
 }

@@ -7,6 +7,7 @@
 import { createErrorResponse } from '../utils/response.js';
 import { getLogger } from '../utils/logger.js';
 import { getSecurityHeaders } from '../utils/security.js';
+import { checkRateLimit, createRateLimitResponse, getClientIdentifier, RATE_LIMIT_PRESETS } from '../utils/rateLimit.js';
 
 /**
  * Favicon API 上游源配置
@@ -64,10 +65,36 @@ export async function handleFaviconProxy(request, env, domain) {
 		return createErrorResponse('无效域名', '请提供有效的域名', 400, request);
 	}
 
+	const clientIP = getClientIdentifier(request, 'ip');
+	const rateLimitInfo = await checkRateLimit(`favicon:${clientIP}:${normalizedDomain}`, env, {
+		...RATE_LIMIT_PRESETS.faviconProxy,
+		failMode: 'closed',
+	});
+	if (!rateLimitInfo.allowed) {
+		logger.warn('favicon 代理触发限流', {
+			clientIP,
+			domain: normalizedDomain,
+			limit: rateLimitInfo.limit,
+		});
+		return createRateLimitResponse(rateLimitInfo, request);
+	}
+
+	const resolvedIPs = await resolveDomainIPs(normalizedDomain, logger);
+	if (resolvedIPs.some((ip) => isPrivateOrReservedIp(ip))) {
+		logger.warn('favicon 代理拦截私网目标', {
+			domain: normalizedDomain,
+			resolvedIPs,
+		});
+		return createErrorResponse('域名受限', '目标域名解析到受限网段，拒绝代理请求', 400, request);
+	}
+
+	const enableHttpFallback = String(env.ENABLE_FAVICON_HTTP_FALLBACK || 'false').toLowerCase() === 'true';
+	const sources = enableHttpFallback ? FAVICON_SOURCES : FAVICON_SOURCES.filter((source) => source.name !== 'Direct-HTTP');
+
 	// 尝试从多个源获取 favicon
 	let lastError = null;
 
-	for (const source of FAVICON_SOURCES) {
+	for (const source of sources) {
 		try {
 			const faviconUrl = source.url(normalizedDomain);
 			logger.debug(`尝试从 ${source.name} 获取 favicon`, { domain: normalizedDomain, url: faviconUrl });
@@ -133,9 +160,9 @@ export async function handleFaviconProxy(request, env, domain) {
 		status: 404,
 		statusText: 'Not Found',
 		headers: {
-			'Content-Type': 'text/plain',
+			...getSecurityHeaders(request, { includeCSP: false, includeCredentials: false }),
+			'Content-Type': 'text/plain; charset=utf-8',
 			'Cache-Control': 'no-cache',
-			'X-Favicon-Error': lastError?.message || 'All sources failed',
 		},
 	});
 }
@@ -184,5 +211,111 @@ function isIPv4Address(value) {
 }
 
 function isIPv6Address(value) {
-	return value.includes(':');
+	return /^[0-9a-f:]+$/i.test(value) && value.includes(':');
+}
+
+function isPrivateOrReservedIp(ip) {
+	if (isIPv4Address(ip)) {
+		return isPrivateOrReservedIPv4(ip);
+	}
+	if (isIPv6Address(ip)) {
+		return isPrivateOrReservedIPv6(ip);
+	}
+	return false;
+}
+
+function isPrivateOrReservedIPv4(ip) {
+	const parts = ip.split('.').map((part) => parseInt(part, 10));
+	const [a, b] = parts;
+
+	if (a === 10) {
+		return true; // 10.0.0.0/8
+	}
+	if (a === 127) {
+		return true; // loopback
+	}
+	if (a === 169 && b === 254) {
+		return true; // link-local
+	}
+	if (a === 172 && b >= 16 && b <= 31) {
+		return true; // 172.16.0.0/12
+	}
+	if (a === 192 && b === 168) {
+		return true; // 192.168.0.0/16
+	}
+	if (a === 0) {
+		return true; // 0.0.0.0/8
+	}
+	if (a >= 224) {
+		return true; // multicast/reserved
+	}
+
+	return false;
+}
+
+function isPrivateOrReservedIPv6(ip) {
+	const normalized = ip.toLowerCase();
+
+	if (normalized === '::1' || normalized === '::') {
+		return true; // loopback/unspecified
+	}
+	if (normalized.startsWith('fc') || normalized.startsWith('fd')) {
+		return true; // unique local
+	}
+	if (normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) {
+		return true; // link-local
+	}
+	if (normalized.startsWith('ff')) {
+		return true; // multicast
+	}
+
+	return false;
+}
+
+async function resolveDomainIPs(domain, logger) {
+	const recordTypes = ['A', 'AAAA'];
+	const results = new Set();
+
+	for (const type of recordTypes) {
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+		try {
+			const response = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(domain)}&type=${type}`, {
+				headers: {
+					Accept: 'application/dns-json',
+				},
+				signal: controller.signal,
+			});
+
+			if (!response.ok) {
+				continue;
+			}
+
+			const payload = await response.json();
+			const answers = Array.isArray(payload?.Answer) ? payload.Answer : [];
+
+			for (const answer of answers) {
+				if (typeof answer?.data === 'string') {
+					const ip = answer.data.trim();
+					if (type === 'A' && isIPv4Address(ip)) {
+						results.add(ip);
+					}
+					if (type === 'AAAA' && isIPv6Address(ip)) {
+						results.add(ip);
+					}
+				}
+			}
+		} catch (error) {
+			logger.warn('favicon 目标 DNS 解析失败', {
+				domain,
+				type,
+				errorMessage: error.message,
+			});
+		} finally {
+			clearTimeout(timeoutId);
+		}
+	}
+
+	return [...results];
 }

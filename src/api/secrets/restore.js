@@ -79,8 +79,8 @@ export async function handleExportBackup(request, env, backupKey) {
 					backupKey,
 					encrypted: true,
 				});
-			} catch (error) {
-				return createErrorResponse('解密失败', `无法解密备份文件：${error.message}。可能使用了错误的加密密钥。`, 500, request);
+			} catch {
+				return createErrorResponse('解密失败', '无法解密备份文件，请确认加密密钥配置正确', 500, request);
 			}
 		} else {
 			// 明文备份，直接解析
@@ -90,8 +90,8 @@ export async function handleExportBackup(request, env, backupKey) {
 					backupKey,
 					encrypted: false,
 				});
-			} catch (error) {
-				return createErrorResponse('解析失败', `备份文件格式错误：${error.message}`, 400, request);
+			} catch {
+				return createErrorResponse('解析失败', '备份文件格式错误', 400, request);
 			}
 		}
 
@@ -262,7 +262,7 @@ export async function handleExportBackup(request, env, backupKey) {
 			},
 			error,
 		);
-		return createErrorResponse('导出备份失败', `导出备份时发生错误：${error.message}`, 500, request);
+		return createErrorResponse('导出备份失败', '导出备份时发生内部错误，请稍后重试', 500, request);
 	}
 }
 
@@ -339,8 +339,8 @@ export async function handleRestoreBackup(request, env) {
 					backupKey,
 					encrypted: true,
 				});
-			} catch (error) {
-				return createErrorResponse('解密失败', `无法解密备份文件：${error.message}。可能使用了错误的加密密钥。`, 500, request);
+			} catch {
+				return createErrorResponse('解密失败', '无法解密备份文件，请确认加密密钥配置正确', 500, request);
 			}
 		} else {
 			// 明文备份，直接解析
@@ -350,8 +350,8 @@ export async function handleRestoreBackup(request, env) {
 					backupKey,
 					encrypted: false,
 				});
-			} catch (error) {
-				return createErrorResponse('解析失败', `备份文件格式错误：${error.message}`, 400, request);
+			} catch {
+				return createErrorResponse('解析失败', '备份文件格式错误', 400, request);
 			}
 		}
 
@@ -417,6 +417,6 @@ export async function handleRestoreBackup(request, env) {
 			},
 			error,
 		);
-		return createErrorResponse('恢复备份失败', `恢复备份时发生错误：${error.message}`, 500, request);
+		return createErrorResponse('恢复备份失败', '恢复备份时发生内部错误，请稍后重试', 500, request);
 	}
 }

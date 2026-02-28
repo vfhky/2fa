@@ -10,7 +10,8 @@ import {
   handleUpdateSecret,
   handleDeleteSecret,
   handleBatchAddSecrets,
-  handleGenerateOTP
+  handleGenerateOTP,
+  handleGenerateOTPFromBody
 } from '../../src/api/secrets/index.js';
 
 // ==================== Mock 模块 ====================
@@ -79,6 +80,26 @@ function createMockRequest(body = {}, method = 'POST', url = 'https://example.co
     }),
     json: async () => body
   };
+}
+
+function createOtpBodyRequest(body, options = {}) {
+  const {
+    ip = '203.0.113.1',
+    url = 'https://example.com/api/otp/generate',
+    headers = {}
+  } = options;
+
+  const requestHeaders = new Headers({
+    'Content-Type': 'application/json',
+    'CF-Connecting-IP': ip,
+    ...headers
+  });
+
+  return new Request(url, {
+    method: 'POST',
+    headers: requestHeaders,
+    body: JSON.stringify(body)
+  });
 }
 
 // ==================== 测试套件 ====================
@@ -618,6 +639,55 @@ describe('API Secrets Module', () => {
       const text = await response.text();
       expect(text).toContain('安全模式（推荐）');
       expect(text).toContain('/api/otp/generate');
+    });
+  });
+
+  describe('handleGenerateOTPFromBody', () => {
+    it('应该通过 POST Body 生成 OTP', async () => {
+      const env = createMockEnv();
+      const request = createOtpBodyRequest({ secret: 'JBSWY3DPEHPK3PXP' });
+      const response = await handleGenerateOTPFromBody(request, env);
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.token).toMatch(/^\d{6}$/);
+    });
+
+    it('secret 超过长度限制时应返回 400', async () => {
+      const env = createMockEnv();
+      const request = createOtpBodyRequest({ secret: 'A'.repeat(257) });
+      const response = await handleGenerateOTPFromBody(request, env);
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('密钥长度超限');
+    });
+
+    it('请求体超限时应返回 413', async () => {
+      const env = createMockEnv();
+      const request = createOtpBodyRequest({
+        secret: 'JBSWY3DPEHPK3PXP',
+        padding: 'A'.repeat(5000)
+      });
+      const response = await handleGenerateOTPFromBody(request, env);
+
+      expect(response.status).toBe(413);
+      const data = await response.json();
+      expect(data.error).toContain('请求体过大');
+    });
+
+    it('高频调用应触发公开 OTP 接口限流', async () => {
+      const env = createMockEnv();
+      let lastResponse;
+
+      for (let i = 0; i < 21; i++) {
+        const request = createOtpBodyRequest({ secret: 'JBSWY3DPEHPK3PXP' });
+        lastResponse = await handleGenerateOTPFromBody(request, env);
+      }
+
+      expect(lastResponse.status).toBe(429);
+      const data = await lastResponse.json();
+      expect(data.error).toContain('请求过于频繁');
     });
   });
 

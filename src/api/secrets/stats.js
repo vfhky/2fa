@@ -52,7 +52,7 @@ export async function handleGetSecretsStats(request, env) {
 			},
 			error,
 		);
-		return createErrorResponse('获取统计失败', `统计密钥数据时发生内部错误：${error.message}`, 500, request);
+		return createErrorResponse('获取统计失败', '统计密钥数据时发生内部错误，请稍后重试', 500, request);
 	}
 }
 

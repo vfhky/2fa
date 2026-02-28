@@ -103,11 +103,13 @@ export function createSuccessResponse(data, message, request = null) {
  * @param {string} html - HTML内容
  * @param {number} status - HTTP状态码
  * @param {Request} request - HTTP 请求对象（用于获取安全头）
+ * @param {Object} additionalHeaders - 额外响应头
  * @returns {Response} HTML响应对象
  */
-export function createHtmlResponse(html, status = 200, request = null) {
+export function createHtmlResponse(html, status = 200, request = null, additionalHeaders = {}) {
 	let headers = {
 		'Content-Type': 'text/html; charset=utf-8',
+		...additionalHeaders,
 	};
 
 	// 添加安全头（如果提供了 request）

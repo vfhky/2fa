@@ -47,6 +47,7 @@ import { getLogger } from './logger.js';
  */
 export async function checkRateLimitSlidingWindow(key, env, options = {}) {
 	const { maxAttempts = 5, windowSeconds = 60 } = options;
+	const failMode = options.failMode === 'closed' ? 'closed' : 'open';
 
 	const rateLimitKey = `ratelimit:v2:${key}`;
 	const logger = getLogger(env);
@@ -128,18 +129,31 @@ export async function checkRateLimitSlidingWindow(key, env, options = {}) {
 			'速率限制检查失败（滑动窗口）',
 			{
 				key,
+				failMode,
 				errorMessage: error.message,
 			},
 			error,
 		);
 
-		// 失败时允许请求（fail open）
+		// 失败时按模式处理（默认兼容 fail-open，敏感路径可配置 fail-closed）
+		if (failMode === 'closed') {
+			return {
+				allowed: false,
+				remaining: 0,
+				resetAt: now + Math.max(windowMs, 30000),
+				limit: maxAttempts,
+				algorithm: 'sliding-window',
+				failMode,
+			};
+		}
+
 		return {
 			allowed: true,
 			remaining: maxAttempts,
 			resetAt: now + windowMs,
 			limit: maxAttempts,
 			algorithm: 'sliding-window',
+			failMode,
 		};
 	}
 }
@@ -173,6 +187,7 @@ export async function checkRateLimit(key, env, options = {}) {
  */
 async function checkRateLimitFixedWindow(key, env, options = {}) {
 	const { maxAttempts = 5, windowSeconds = 60 } = options;
+	const failMode = options.failMode === 'closed' ? 'closed' : 'open';
 
 	const rateLimitKey = `ratelimit:${key}`;
 	const logger = getLogger(env);
@@ -237,10 +252,22 @@ async function checkRateLimitFixedWindow(key, env, options = {}) {
 			'速率限制检查失败（固定窗口）',
 			{
 				key,
+				failMode,
 				errorMessage: error.message,
 			},
 			error,
 		);
+
+		if (failMode === 'closed') {
+			return {
+				allowed: false,
+				remaining: 0,
+				resetAt: Date.now() + Math.max(windowSeconds * 1000, 30000),
+				limit: maxAttempts,
+				algorithm: 'fixed-window',
+				failMode,
+			};
+		}
 
 		return {
 			allowed: true,
@@ -248,6 +275,7 @@ async function checkRateLimitFixedWindow(key, env, options = {}) {
 			resetAt: Date.now() + windowSeconds * 1000,
 			limit: maxAttempts,
 			algorithm: 'fixed-window',
+			failMode,
 		};
 	}
 }
@@ -495,6 +523,27 @@ export const RATE_LIMIT_PRESETS = {
 	bulk: {
 		maxAttempts: 20,
 		windowSeconds: 300,
+		algorithm: 'sliding-window',
+	},
+
+	// 公开 OTP 接口：20 次请求 / 分钟
+	otpPublic: {
+		maxAttempts: 20,
+		windowSeconds: 60,
+		algorithm: 'sliding-window',
+	},
+
+	// favicon 代理：30 次请求 / 分钟
+	faviconProxy: {
+		maxAttempts: 30,
+		windowSeconds: 60,
+		algorithm: 'sliding-window',
+	},
+
+	// Token 刷新：20 次请求 / 分钟
+	refreshToken: {
+		maxAttempts: 20,
+		windowSeconds: 60,
 		algorithm: 'sliding-window',
 	},
 

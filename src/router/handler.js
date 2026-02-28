@@ -36,6 +36,7 @@ import {
 	createUnauthorizedResponse,
 	handleLogin,
 	handleRefreshToken,
+	handleLogout,
 	checkIfSetupRequired,
 	handleFirstTimeSetup,
 } from '../utils/auth.js';
@@ -63,7 +64,7 @@ export async function handleRequest(request, env) {
 				// 已完成设置，重定向到首页
 				return Response.redirect(new URL('/', request.url).toString(), 302);
 			}
-			return await createSetupPage();
+			return await createSetupPage(request);
 		}
 
 		// 🔧 首次设置 API（不需要认证）
@@ -80,7 +81,7 @@ export async function handleRequest(request, env) {
 
 		// 🔐 检查是否需要身份验证（使用详细验证以支持自动续期）
 		let authDetails = null;
-		if (requiresAuth(pathname)) {
+		if (requiresAuth(pathname, env)) {
 			authDetails = await verifyAuthWithDetails(request, env);
 
 			if (!authDetails || !authDetails.valid) {
@@ -104,7 +105,7 @@ export async function handleRequest(request, env) {
 
 		// 静态路由处理
 		if (pathname === '/' || pathname === '') {
-			return await createMainPage();
+			return await createMainPage(request);
 		}
 
 		// PWA Manifest
@@ -142,7 +143,7 @@ export async function handleRequest(request, env) {
 				});
 			} catch (error) {
 				logger.error(`加载模块 ${moduleName} 失败`, { errorMessage: error.message }, error);
-				return createErrorResponse('模块加载失败', error.message, 500, request);
+				return createErrorResponse('模块加载失败', '模块加载失败，请稍后重试', 500, request);
 			}
 		}
 
@@ -156,11 +157,16 @@ export async function handleRequest(request, env) {
 			return await handleRefreshToken(request, env);
 		}
 
+		// 登出路由（受保护）
+		if (pathname === '/api/logout' && method === 'POST') {
+			return await handleLogout(request, env);
+		}
+
 		// API路由处理
 		if (pathname.startsWith('/api/')) {
 			const response = await handleApiRequest(pathname, method, request, env);
 
-			// 🔄 自动续期：如果 Token 剩余时间 < 7天，在响应头中添加标记
+			// 🔄 自动续期：如果 Token 进入续期阈值，在响应头中添加标记
 			if (request.authDetails && request.authDetails.needsRefresh) {
 				const newResponse = new Response(response.body, response);
 				newResponse.headers.set('X-Token-Refresh-Needed', 'true');
@@ -226,7 +232,7 @@ async function handleApiRequest(pathname, method, request, env) {
 	// 密钥管理API
 	if (pathname === '/api/otp/generate') {
 		if (method === 'POST') {
-			return handleGenerateOTPFromBody(request);
+			return handleGenerateOTPFromBody(request, env);
 		}
 		return createErrorResponse('方法不允许', `不支持的HTTP方法: ${method}`, 405, request);
 	}

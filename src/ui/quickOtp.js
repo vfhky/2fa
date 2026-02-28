@@ -3,6 +3,7 @@
  * 提供简洁的 HTML 页面用于显示 OTP 验证码
  * 与原 2fa 项目界面完全一致
  */
+import { createHtmlResponse } from '../utils/response.js';
 
 /**
  * 创建简单的 HTML 页面用于显示 OTP 验证码（原始风格）
@@ -11,9 +12,10 @@
  * @param {number} options.period - 时间周期（秒），默认：30
  * @param {number} options.remainingTime - 剩余时间（秒）
  * @param {string} options.type - OTP 类型（TOTP/HOTP）
+ * @param {Request} request - HTTP请求对象（可选）
  * @returns {Response} HTML 响应
  */
-export function createQuickOtpPage(otp, options = {}) {
+export function createQuickOtpPage(otp, options = {}, request = null) {
 	const { period = 30, remainingTime = 30, type: _type = 'TOTP' } = options;
 
 	const htmlContent = `
@@ -127,13 +129,10 @@ export function createQuickOtpPage(otp, options = {}) {
 </html>
   `;
 
-	return new Response(htmlContent, {
-		headers: {
-			'Content-Type': 'text/html; charset=utf-8',
-			'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-			Pragma: 'no-cache',
-			Expires: '0',
-		},
+	return createHtmlResponse(htmlContent, 200, request, {
+		'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+		Pragma: 'no-cache',
+		Expires: '0',
 	});
 }
 

@@ -82,14 +82,33 @@ async function hashPassword(password) {
   return `${saltB64}$${hashB64}`;
 }
 
+function timingSafeEqual(a, b) {
+  const maxLength = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+
+  for (let i = 0; i < maxLength; i++) {
+    const valueA = i < a.length ? a[i] : 0;
+    const valueB = i < b.length ? b[i] : 0;
+    diff |= valueA ^ valueB;
+  }
+
+  return diff === 0;
+}
+
 async function verifyPassword(password, storedHash) {
   try {
-    const [saltB64, hashB64] = storedHash.split('$');
+    const hashParts = typeof storedHash === 'string' ? storedHash.split('$') : [];
+    if (hashParts.length !== 2) {
+      return false;
+    }
+
+    const [saltB64, hashB64] = hashParts;
     if (!saltB64 || !hashB64) {
       return false;
     }
 
     const salt = Uint8Array.from(atob(saltB64), c => c.charCodeAt(0));
+    const expectedHashBytes = Uint8Array.from(atob(hashB64), c => c.charCodeAt(0));
     const encoder = new TextEncoder();
     const passwordBuffer = encoder.encode(password);
 
@@ -112,8 +131,8 @@ async function verifyPassword(password, storedHash) {
       256
     );
 
-    const calculatedHashB64 = btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
-    return calculatedHashB64 === hashB64;
+    const calculatedHashBytes = new Uint8Array(hashBuffer);
+    return timingSafeEqual(calculatedHashBytes, expectedHashBytes);
   } catch (error) {
     return false;
   }
@@ -370,6 +389,16 @@ describe('JWT Authentication Utils', () => {
 
       // 空字符串
       expect(await verifyPassword(password, '')).toBe(false);
+    });
+
+    it('哈希长度异常时应安全失败', async () => {
+      const password = 'TestPass123!';
+      const validHash = await hashPassword(password);
+      const [saltB64] = validHash.split('$');
+      const shortHashB64 = btoa('short');
+
+      const isValid = await verifyPassword(password, `${saltB64}$${shortHashB64}`);
+      expect(isValid).toBe(false);
     });
 
     it('应该处理中文和特殊字符密码', async () => {
@@ -671,10 +700,16 @@ describe('JWT Authentication Utils', () => {
       expect(requiresAuth('/otp/any-secret-key')).toBe(false);
     });
 
+    it('启用 REQUIRE_AUTH_FOR_OTP_API 时，/api/otp/generate 需要认证', () => {
+      expect(requiresAuth('/api/otp/generate')).toBe(false);
+      expect(requiresAuth('/api/otp/generate', { REQUIRE_AUTH_FOR_OTP_API: 'true' })).toBe(true);
+    });
+
     it('API 端点需要认证', () => {
       expect(requiresAuth('/api/secrets')).toBe(true);
       expect(requiresAuth('/api/secrets/123')).toBe(true);
       expect(requiresAuth('/api/backup')).toBe(true);
+      expect(requiresAuth('/api/logout')).toBe(true);
       expect(requiresAuth('/api/import')).toBe(true);
     });
 

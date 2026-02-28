@@ -40,6 +40,20 @@ const LogLevelIcons = {
 };
 
 const SENSITIVE_QUERY_PARAMS = new Set(['secret', 'token', 'password', 'credential', 'auth', 'key', 'otp']);
+const SENSITIVE_HEADER_NAMES = new Set(['authorization', 'cookie', 'set-cookie', 'x-api-key']);
+
+function sanitizeHeadersForLog(headers) {
+	const sanitized = {};
+
+	if (headers && headers.forEach) {
+		headers.forEach((value, key) => {
+			const lowerKey = key.toLowerCase();
+			sanitized[key] = SENSITIVE_HEADER_NAMES.has(lowerKey) ? '***REDACTED***' : value;
+		});
+	}
+
+	return sanitized;
+}
 
 /**
  * 脱敏 URL，避免敏感信息写入日志
@@ -135,21 +149,7 @@ class Logger {
 	 * @private
 	 */
 	_sanitizeHeaders(headers) {
-		const sanitized = {};
-		const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key'];
-
-		if (headers && headers.forEach) {
-			headers.forEach((value, key) => {
-				const lowerKey = key.toLowerCase();
-				if (sensitiveHeaders.includes(lowerKey)) {
-					sanitized[key] = '***REDACTED***';
-				} else {
-					sanitized[key] = value;
-				}
-			});
-		}
-
-		return sanitized;
+		return sanitizeHeadersForLog(headers);
 	}
 
 	/**
@@ -425,7 +425,7 @@ export function createRequestLogger(logger = null) {
 			const responseData = {
 				status: response?.status,
 				statusText: response?.statusText,
-				headers: response?.headers ? Object.fromEntries(response.headers) : {},
+				headers: this._sanitizeHeaders(response?.headers),
 			};
 
 			if (error) {
@@ -444,21 +444,7 @@ export function createRequestLogger(logger = null) {
 		},
 
 		_sanitizeHeaders(headers) {
-			const sanitized = {};
-			const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key'];
-
-			if (headers && headers.forEach) {
-				headers.forEach((value, key) => {
-					const lowerKey = key.toLowerCase();
-					if (sensitiveHeaders.includes(lowerKey)) {
-						sanitized[key] = '***REDACTED***';
-					} else {
-						sanitized[key] = value;
-					}
-				});
-			}
-
-			return sanitized;
+			return sanitizeHeadersForLog(headers);
 		},
 	};
 }

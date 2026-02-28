@@ -15,6 +15,7 @@ vi.mock('../../src/api/secrets/index.js', () => ({
   handleUpdateSecret: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   handleDeleteSecret: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   handleGenerateOTP: vi.fn(async (secret, request) => new Response(JSON.stringify({ token: '123456' }), { status: 200 })),
+  handleGenerateOTPFromBody: vi.fn(async (request, env) => new Response(JSON.stringify({ token: '123456' }), { status: 200 })),
   handleBatchAddSecrets: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   handleBatchDeleteSecrets: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, deletedCount: 1 }), { status: 200 })),
   handleGetSecretsStats: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, data: { overview: { totalSecrets: 0 } } }), { status: 200 })),
@@ -48,7 +49,7 @@ vi.mock('../../src/utils/auth.js', () => ({
   verifyAuthWithDetails: vi.fn(async (request, env) => ({ valid: true, token: 'test-token' })),
   requiresAuth: vi.fn((pathname) => {
     // Public routes
-    const publicPaths = ['/', '/api/login', '/api/refresh-token', '/api/setup', '/setup', '/manifest.json', '/sw.js', '/icon-192.png', '/icon-512.png'];
+    const publicPaths = ['/', '/api/login', '/api/refresh-token', '/api/setup', '/api/otp/generate', '/setup', '/manifest.json', '/sw.js', '/icon-192.png', '/icon-512.png'];
     if (publicPaths.includes(pathname)) return false;
     if (pathname.startsWith('/otp')) return false;
     return true;
@@ -56,6 +57,7 @@ vi.mock('../../src/utils/auth.js', () => ({
   createUnauthorizedResponse: vi.fn((message, request) => new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })),
   handleLogin: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, token: 'test-token' }), { status: 200 })),
   handleRefreshToken: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, token: 'new-token' }), { status: 200 })),
+  handleLogout: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   checkIfSetupRequired: vi.fn(async (env) => false),
   handleFirstTimeSetup: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 }))
 }));
@@ -379,6 +381,21 @@ describe('Router Handler', () => {
       expect(handleRefreshToken).toHaveBeenCalledWith(request, env);
       expect(response.status).toBe(200);
     });
+
+    it('应该处理登出请求', async () => {
+      const { handleLogout } = await import('../../src/utils/auth.js');
+
+      const request = createMockRequest({
+        method: 'POST',
+        pathname: '/api/logout'
+      });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(handleLogout).toHaveBeenCalledWith(request, env);
+      expect(response.status).toBe(200);
+    });
   });
 
   describe('handleRequest - API 路由分发', () => {
@@ -544,6 +561,34 @@ describe('Router Handler', () => {
       const request = createMockRequest({
         method: 'GET',
         pathname: '/api/secrets/test-id'
+      });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(response.status).toBe(405);
+    });
+
+    it('应该处理 POST /api/otp/generate', async () => {
+      const { handleGenerateOTPFromBody } = await import('../../src/api/secrets/index.js');
+
+      const request = createMockRequest({
+        method: 'POST',
+        pathname: '/api/otp/generate',
+        body: { secret: 'JBSWY3DPEHPK3PXP' }
+      });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(handleGenerateOTPFromBody).toHaveBeenCalledWith(request, env);
+      expect(response.status).toBe(200);
+    });
+
+    it('应该拒绝 /api/otp/generate 的不支持方法', async () => {
+      const request = createMockRequest({
+        method: 'GET',
+        pathname: '/api/otp/generate'
       });
       const env = createMockEnv();
 
