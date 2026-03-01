@@ -60,7 +60,85 @@ export function getQRDecodeToolCode() {
           decodeStream = null;
         }
 
-        decodeStream = await openCameraStream(video);
+        if (typeof openCameraStream === 'function') {
+          decodeStream = await openCameraStream(video);
+        } else {
+          // 回退：当主模块不可用时使用内联摄像头逻辑
+          if (!navigator.mediaDevices) {
+            if (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia) {
+              navigator.mediaDevices = {};
+              navigator.mediaDevices.getUserMedia = function(constraints) {
+                const getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+                if (!getUserMedia) {
+                  return Promise.reject(new Error('getUserMedia is not implemented in this browser'));
+                }
+                return new Promise((resolve, reject) => {
+                  getUserMedia.call(navigator, constraints, resolve, reject);
+                });
+              };
+            } else {
+              throw new Error('您的浏览器不支持摄像头功能，请使用现代浏览器');
+            }
+          }
+
+          if (!navigator.mediaDevices.getUserMedia) {
+            throw new Error('您的浏览器不支持摄像头功能，请使用现代浏览器');
+          }
+
+          const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+          const isIPad = /iPad/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+          let configs;
+          if (isIPad || isIOS) {
+            configs = [
+              { video: { facingMode: 'environment', width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 } } },
+              { video: { facingMode: 'user', width: { ideal: 480, max: 640 }, height: { ideal: 360, max: 480 } } },
+              { video: { width: { ideal: 640 }, height: { ideal: 480 } } },
+              { video: true }
+            ];
+          } else {
+            configs = [
+              { video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } } },
+              { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } },
+              { video: true }
+            ];
+          }
+
+          let stream = null;
+          for (let i = 0; i < configs.length; i++) {
+            try {
+              stream = await navigator.mediaDevices.getUserMedia(configs[i]);
+              break;
+            } catch (e) {
+              if (i === configs.length - 1) {
+                throw e;
+              }
+            }
+          }
+
+          if (!stream) {
+            throw new Error('无法获取摄像头访问权限');
+          }
+
+          decodeStream = stream;
+          video.srcObject = decodeStream;
+
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('摄像头加载超时'));
+            }, 10000);
+
+            video.onloadedmetadata = () => {
+              clearTimeout(timeout);
+              video.play().then(resolve).catch(reject);
+            };
+
+            video.onerror = () => {
+              clearTimeout(timeout);
+              reject(new Error('摄像头播放失败'));
+            };
+          });
+        }
 
         status.textContent = '';
         status.style.display = 'none';
@@ -83,7 +161,10 @@ export function getQRDecodeToolCode() {
         }, 500);
 
       } catch (err) {
-        errorMessage.textContent = getCameraErrorMessage(err);
+        const errorMsg = typeof getCameraErrorMessage === 'function'
+          ? getCameraErrorMessage(err)
+          : '摄像头启动失败: ' + err.message;
+        errorMessage.textContent = errorMsg;
         error.style.display = 'block';
         status.style.display = 'none';
       }
@@ -106,7 +187,33 @@ export function getQRDecodeToolCode() {
     }
 
     function decodeQRCodeForTool(imageData, deepMode, aggressiveMode = false) {
-      return decodeQRCode(imageData, { deep: deepMode, aggressive: aggressiveMode });
+      if (typeof decodeQRCode === 'function') {
+        return decodeQRCode(imageData, { deep: deepMode, aggressive: aggressiveMode });
+      }
+
+      // 回退：当主模块不可用时使用 jsQR 直接解码
+      if (typeof jsQR === 'undefined') {
+        return null;
+      }
+
+      const parseOptions = [
+        { inversionAttempts: 'invertFirst' },
+        { inversionAttempts: 'dontInvert' },
+        { inversionAttempts: 'attemptBoth' }
+      ];
+
+      for (let i = 0; i < parseOptions.length; i++) {
+        try {
+          const result = jsQR(imageData.data, imageData.width, imageData.height, parseOptions[i]);
+          if (result && result.data) {
+            return result.data;
+          }
+        } catch (error) {
+          // ignore individual parse option failures
+        }
+      }
+
+      return null;
     }
 
     function scanForDecodeQRCode() {
@@ -153,7 +260,7 @@ export function getQRDecodeToolCode() {
             }
 
             // paulmillr/qr 同步解码（快速、高精度）
-            if (paulmillrDecodeQR) {
+            if (typeof paulmillrDecodeQR !== 'undefined' && paulmillrDecodeQR && typeof tryPaulmillrDecode === 'function') {
               const pmResult = tryPaulmillrDecode(imageData, '');
               if (pmResult) {
                 console.log('工具paulmillr/qr扫描成功');
@@ -166,7 +273,10 @@ export function getQRDecodeToolCode() {
             const qrCode = decodeQRCodeForTool(imageData, deepMode, false);
 
             if (qrCode) {
-              console.log('二维码解析成功:', maskQRCodeDataForLog(qrCode));
+              const preview = typeof maskQRCodeDataForLog === 'function'
+                ? maskQRCodeDataForLog(qrCode)
+                : (typeof qrCode === 'string' ? (qrCode.length > 96 ? qrCode.slice(0, 96) + '...(' + qrCode.length + ' chars)' : qrCode) : '');
+              console.log('二维码解析成功:', preview);
               processDecodeResult(qrCode);
               return;
             }
