@@ -2,6 +2,7 @@ name = "2fa"
 main = "src/worker.js"
 compatibility_date = "2024-01-13"
 workers_dev = true
+preview_urls = false
 
 # KV 命名空间
 # 部署时由 scripts/deploy.js 自动查找或创建，无需手动配置
