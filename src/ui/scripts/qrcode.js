@@ -21,7 +21,7 @@ export function getQRCodeCode() {
     const DEEP_SCAN_INTERVAL = 4;
     const CENTER_CROP_RATIO = 0.72;
     const UPLOAD_DETECT_MAX_SIDE = 2200;
-    const QR_PIPELINE_VERSION = '2026-03-01-r5';
+    const QR_PIPELINE_VERSION = '2026-03-01-r6';
 
     // 切换连续扫描模式
     function toggleContinuousScan() {
@@ -650,6 +650,36 @@ export function getQRCodeCode() {
       );
     }
 
+    function resizeImageDataNearest(imageData, targetWidth, targetHeight) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const safeTargetWidth = Math.max(1, Math.floor(targetWidth));
+      const safeTargetHeight = Math.max(1, Math.floor(targetHeight));
+
+      if (safeTargetWidth === width && safeTargetHeight === height) {
+        return imageData;
+      }
+
+      const output = new Uint8ClampedArray(safeTargetWidth * safeTargetHeight * 4);
+      const xRatio = width / safeTargetWidth;
+      const yRatio = height / safeTargetHeight;
+
+      for (let y = 0; y < safeTargetHeight; y++) {
+        const srcY = Math.min(height - 1, Math.floor(y * yRatio));
+        for (let x = 0; x < safeTargetWidth; x++) {
+          const srcX = Math.min(width - 1, Math.floor(x * xRatio));
+          const srcIndex = (srcY * width + srcX) * 4;
+          const destIndex = (y * safeTargetWidth + x) * 4;
+          output[destIndex] = imageData.data[srcIndex];
+          output[destIndex + 1] = imageData.data[srcIndex + 1];
+          output[destIndex + 2] = imageData.data[srcIndex + 2];
+          output[destIndex + 3] = imageData.data[srcIndex + 3];
+        }
+      }
+
+      return buildImageData(output, safeTargetWidth, safeTargetHeight);
+    }
+
     function upscaleImageData(imageData, scale = 2, maxSide = 2200) {
       if (!Number.isFinite(scale) || scale <= 1) {
         return imageData;
@@ -664,20 +694,7 @@ export function getQRCodeCode() {
         return imageData;
       }
 
-      const sourceCanvas = document.createElement('canvas');
-      sourceCanvas.width = width;
-      sourceCanvas.height = height;
-      const sourceCtx = sourceCanvas.getContext('2d');
-      sourceCtx.putImageData(imageData, 0, 0);
-
-      const targetCanvas = document.createElement('canvas');
-      targetCanvas.width = targetWidth;
-      targetCanvas.height = targetHeight;
-      const targetCtx = targetCanvas.getContext('2d');
-      targetCtx.imageSmoothingEnabled = false;
-      targetCtx.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight);
-
-      return targetCtx.getImageData(0, 0, targetWidth, targetHeight);
+      return resizeImageDataNearest(imageData, targetWidth, targetHeight);
     }
 
     function getAggressiveRegionCandidates(imageData) {
@@ -747,22 +764,7 @@ export function getQRCodeCode() {
       const ratio = maxSide / largestSide;
       const targetWidth = Math.max(1, Math.floor(width * ratio));
       const targetHeight = Math.max(1, Math.floor(height * ratio));
-
-      const sourceCanvas = document.createElement('canvas');
-      sourceCanvas.width = width;
-      sourceCanvas.height = height;
-      const sourceCtx = sourceCanvas.getContext('2d');
-      sourceCtx.putImageData(imageData, 0, 0);
-
-      const targetCanvas = document.createElement('canvas');
-      targetCanvas.width = targetWidth;
-      targetCanvas.height = targetHeight;
-      const targetCtx = targetCanvas.getContext('2d');
-      // 二维码场景优先保持模块边缘，避免插值模糊导致识别失败
-      targetCtx.imageSmoothingEnabled = false;
-      targetCtx.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight);
-
-      return targetCtx.getImageData(0, 0, targetWidth, targetHeight);
+      return resizeImageDataNearest(imageData, targetWidth, targetHeight);
     }
 
     function enhanceImageData(imageData, mode) {
@@ -970,6 +972,95 @@ export function getQRCodeCode() {
       return jsQrResult;
     }
 
+    async function renderImageDataWithBitmap(file, maxSide, sourceName, debugEnabled) {
+      if (typeof createImageBitmap === 'undefined') {
+        qrDebugLog(debugEnabled, sourceName, 'createImageBitmap 不可用，跳过备用渲染');
+        return null;
+      }
+
+      let bitmap = null;
+      try {
+        bitmap = await createImageBitmap(file, {
+          imageOrientation: 'none',
+          premultiplyAlpha: 'none',
+          colorSpaceConversion: 'none'
+        });
+
+        let width = bitmap.width;
+        let height = bitmap.height;
+        if (width > maxSide || height > maxSide) {
+          const ratio = Math.min(maxSide / width, maxSide / height);
+          width = Math.max(1, Math.floor(width * ratio));
+          height = Math.max(1, Math.floor(height * ratio));
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(bitmap, 0, 0, width, height);
+        const imageData = ctx.getImageData(0, 0, width, height);
+
+        qrDebugLog(debugEnabled, sourceName, 'createImageBitmap 备用渲染成功', {
+          originalSize: bitmap.width + 'x' + bitmap.height,
+          renderedSize: width + 'x' + height
+        });
+
+        return imageData;
+      } catch (error) {
+        qrDebugLog(debugEnabled, sourceName, 'createImageBitmap 备用渲染失败', {
+          reason: error && error.message ? error.message : 'unknown'
+        });
+        return null;
+      } finally {
+        if (bitmap && typeof bitmap.close === 'function') {
+          bitmap.close();
+        }
+      }
+    }
+
+    async function decodeUploadedQRCodeWithBitmapFallback(file, primaryImageData, options = {}) {
+      const aggressiveMode = options.aggressive !== false;
+      const sourceName = options.sourceName || '图片上传';
+      const debugEnabled = options.debug !== false;
+
+      const primaryResult = await decodeUploadedQRCode(primaryImageData, {
+        aggressive: aggressiveMode,
+        sourceName,
+        debug: debugEnabled
+      });
+      if (primaryResult) {
+        return primaryResult;
+      }
+
+      qrDebugLog(debugEnabled, sourceName, '主渲染路径未命中，进入createImageBitmap备用渲染');
+      const bitmapImageData = await renderImageDataWithBitmap(file, UPLOAD_DETECT_MAX_SIDE, sourceName, debugEnabled);
+      if (!bitmapImageData) {
+        qrDebugLog(debugEnabled, sourceName, 'createImageBitmap 备用渲染未产出图像数据，结束');
+        return null;
+      }
+
+      qrDebugLog(debugEnabled, sourceName, '开始createImageBitmap二次解析', {
+        size: describeImageData(bitmapImageData)
+      });
+      const bitmapSourceName = sourceName + '(bitmap)';
+      const bitmapResult = await decodeUploadedQRCode(bitmapImageData, {
+        aggressive: aggressiveMode,
+        sourceName: bitmapSourceName,
+        debug: debugEnabled
+      });
+      if (bitmapResult) {
+        qrDebugLog(debugEnabled, sourceName, 'createImageBitmap二次解析成功', {
+          preview: maskQRCodeDataForLog(bitmapResult)
+        });
+        return bitmapResult;
+      }
+
+      qrDebugLog(debugEnabled, sourceName, 'createImageBitmap二次解析未命中');
+      return null;
+    }
+
     // 使用 jsQR 进行增强解码（快速路径 + 深度路径）
     function decodeQRCode(imageData, options = {}) {
       try {
@@ -1042,7 +1133,22 @@ export function getQRCodeCode() {
 
         // 静态图片导入时启用更激进策略（高密度/偏位 Google 迁移码）
         if (options.aggressive) {
-          const upscaled = upscaleImageData(imageData, 2, 2200);
+          const centerFocused = extractCenterImageData(imageData, CENTER_CROP_RATIO);
+          if (centerFocused !== imageData) {
+            const centerFocusedUpscaled = upscaleImageData(centerFocused, 2, 2200);
+            result = runJsQRAttempts(centerFocusedUpscaled, deepOptions, debugTag, 'aggressive/center-upscaled');
+            if (result) return result;
+
+            const centerFocusedContrast = enhanceImageData(centerFocusedUpscaled, 'contrastStrong');
+            result = runJsQRAttempts(centerFocusedContrast, deepOptions, debugTag, 'aggressive/center-upscaled-contrast');
+            if (result) return result;
+
+            const centerFocusedBinary = enhanceImageData(centerFocusedUpscaled, 'binaryAdaptive');
+            result = runJsQRAttempts(centerFocusedBinary, deepOptions, debugTag, 'aggressive/center-upscaled-binaryAdaptive');
+            if (result) return result;
+          }
+
+          const upscaled = upscaleImageData(imageData, 2, 2800);
           if (upscaled !== imageData) {
             result = runJsQRAttempts(upscaled, deepOptions, debugTag, 'aggressive/upscaled');
             if (result) return result;
@@ -1226,13 +1332,17 @@ export function getQRCodeCode() {
             try {
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                throw new Error('无法创建图片绘图上下文');
+              }
 
               canvas.width = img.width;
               canvas.height = img.height;
+              ctx.imageSmoothingEnabled = false;
               ctx.drawImage(img, 0, 0);
 
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const qrCode = await decodeUploadedQRCode(imageData, {
+              const qrCode = await decodeUploadedQRCodeWithBitmapFallback(file, imageData, {
                 aggressive: true,
                 sourceName: '主扫码图片导入'
               });
@@ -1306,6 +1416,9 @@ export function getQRCodeCode() {
               // 创建 canvas 来处理图片
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                throw new Error('无法创建图片绘图上下文');
+              }
 
               // 限制最大尺寸以提高性能
               let { width, height } = img;
@@ -1325,6 +1438,7 @@ export function getQRCodeCode() {
               canvas.height = height;
 
               // 将图片绘制到 canvas
+              ctx.imageSmoothingEnabled = false;
               ctx.drawImage(img, 0, 0, width, height);
 
               // 获取图像数据
@@ -1333,7 +1447,7 @@ export function getQRCodeCode() {
 
               // 尝试解析二维码（增强模式）
               status.textContent = '正在智能解析二维码...';
-              const qrCode = await decodeUploadedQRCode(imageData, {
+              const qrCode = await decodeUploadedQRCodeWithBitmapFallback(file, imageData, {
                 aggressive: true,
                 sourceName: '主扫码图片上传'
               });

@@ -363,12 +363,17 @@ export function getQRDecodeToolCode() {
               ctx.drawImage(img, 0, 0);
 
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const qrCode = typeof decodeUploadedQRCode === 'function'
-                ? await decodeUploadedQRCode(imageData, {
+              const qrCode = typeof decodeUploadedQRCodeWithBitmapFallback === 'function'
+                ? await decodeUploadedQRCodeWithBitmapFallback(file, imageData, {
                     aggressive: true,
                     sourceName: '工具二维码图片上传'
                   })
-                : decodeQRCodeForTool(imageData, true, true);
+                : (typeof decodeUploadedQRCode === 'function'
+                    ? await decodeUploadedQRCode(imageData, {
+                        aggressive: true,
+                        sourceName: '工具二维码图片上传'
+                      })
+                    : decodeQRCodeForTool(imageData, true, true));
 
               if (qrCode) {
                 processDecodeResult(qrCode);
