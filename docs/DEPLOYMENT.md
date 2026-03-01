@@ -30,7 +30,7 @@
 
 ### 第 1 步：点击一键部署
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wuzf/2fa)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/vfhky/2fa)
 
 1. 点击上面的部署按钮
 2. 如果未登录 Cloudflare，会提示登录
@@ -316,7 +316,7 @@ node --version
 3. 克隆项目：
 
    ```bash
-   git clone https://github.com/wuzf/2fa.git
+   git clone https://github.com/vfhky/2fa.git
    ```
 
 4. 进入项目目录：
@@ -326,7 +326,7 @@ node --version
 
 **方法 2：直接下载 ZIP（无需 Git）**
 
-1. 访问 [项目页面](https://github.com/wuzf/2fa)
+1. 访问 [项目页面](https://github.com/vfhky/2fa)
 2. 点击绿色的"Code"按钮
 3. 点击"Download ZIP"
 4. 下载完成后，解压到任意文件夹
@@ -679,11 +679,11 @@ npm run deploy
    - 浏览器控制台（按 `F12` 打开）
 
 2. **搜索已知问题**：
-   - 查看 [GitHub Issues](https://github.com/wuzf/2fa/issues)
+   - 查看 [GitHub Issues](https://github.com/vfhky/2fa/issues)
    - 搜索错误关键词
 
 3. **提交问题**：
-   - [创建新 Issue](https://github.com/wuzf/2fa/issues/new)
+   - [创建新 Issue](https://github.com/vfhky/2fa/issues/new)
    - 描述问题和错误信息
    - 附上命令行输出截图
 
@@ -698,7 +698,7 @@ npm run deploy
 ### 步骤 1: 克隆项目
 
 ```bash
-git clone https://github.com/wuzf/2fa.git
+git clone https://github.com/vfhky/2fa.git
 cd 2fa
 ```
 
@@ -1382,4 +1382,4 @@ npx wrangler secret delete SENTRY_DSN
 
 ---
 
-**支持**: 如有问题，请提交 [GitHub Issue](https://github.com/wuzf/2fa/issues)
+**支持**: 如有问题，请提交 [GitHub Issue](https://github.com/vfhky/2fa/issues)

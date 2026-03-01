@@ -39,9 +39,9 @@
 
 - [项目主README](../README.md) - 项目介绍和特性
 - [贡献指南](../.github/CONTRIBUTING.md) - 如何参与贡献
-- [GitHub Issues](https://github.com/wuzf/2fa/issues) - 问题反馈
+- [GitHub Issues](https://github.com/vfhky/2fa/issues) - 问题反馈
 
 ---
 
-**维护者**: wuzf
+**维护者**: vfhky
 **许可证**: MIT

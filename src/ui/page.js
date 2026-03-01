@@ -65,26 +65,26 @@ function getHTMLStart() {
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="2FA">
-  
+
   <!-- iOS Icons -->
   <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/icon-192.png">
   <link rel="apple-touch-icon" sizes="152x152" href="/icon-192.png">
   <link rel="apple-touch-icon" sizes="120x120" href="/icon-192.png">
-  
+
   <!-- Favicon -->
   <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
   <link rel="shortcut icon" href="/icon-192.png">
-  
+
   <!-- Microsoft Tiles -->
   <meta name="msapplication-TileColor" content="#2196F3">
   <meta name="msapplication-TileImage" content="/icon-192.png">
   <meta name="msapplication-config" content="none">
-  
+
   <!-- PWA Display -->
   <meta name="display" content="standalone">
-  
+
   <!-- Security -->
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
 
@@ -176,11 +176,11 @@ function getHTMLBody() {
 
       <!-- 背景遮罩 -->
       <div class="menu-overlay" id="menuOverlay" onclick="closeActionMenu()"></div>
-      
+
       <div id="loading" class="loading">
         <div>⏳ 加载中...</div>
       </div>
-      
+
       <div id="secretsList" class="secrets-list" style="display: none;">
         <!-- 密钥列表将在这里动态生成 -->
       </div>
@@ -190,7 +190,7 @@ function getHTMLBody() {
         <div class="secrets-page-info" id="secretsPageInfo">第 1 / 1 页</div>
         <button type="button" class="btn btn-outline" id="secretsNextBtn" onclick="changeSecretsPage(1)">下一页</button>
       </div>
-      
+
       <div id="emptyState" class="empty-state" style="display: none;">
         <div class="icon">🔑</div>
         <h3>还没有密钥</h3>
@@ -202,8 +202,8 @@ function getHTMLBody() {
       </div>
     </div>
   </div>
-  
-  
+
+
   <!-- 二维码扫描器模态框 -->
   <div id="qrScanModal" class="modal">
     <div class="modal-content">
@@ -249,7 +249,7 @@ function getHTMLBody() {
       </div>
     </div>
   </div>
-  
+
   <!-- 添加/编辑密钥模态框 -->
   <div id="secretModal" class="modal">
     <div class="modal-content">
@@ -257,7 +257,7 @@ function getHTMLBody() {
         <h2 id="modalTitle">添加新密钥</h2>
         <button class="close-btn" onclick="hideSecretModal()">&times;</button>
       </div>
-      
+
       <form id="secretForm" onsubmit="handleSubmit(event)" autocomplete="off">
         <input type="hidden" id="secretId" value="">
 
@@ -275,16 +275,16 @@ function getHTMLBody() {
           <label for="secretKey">密钥 (Base32) *</label>
           <input type="text" id="secretKey" required placeholder="输入16位或更长的Base32密钥" autocomplete="off">
         </div>
-        
+
         <!-- 高级参数区域 -->
         <div class="form-section">
           <div class="section-header">
             <label>
-              <input type="checkbox" id="showAdvanced" onchange="toggleAdvancedOptions()"> 
+              <input type="checkbox" id="showAdvanced" onchange="toggleAdvancedOptions()">
               高级设置 (可选)
             </label>
           </div>
-          
+
           <div id="advancedOptions" class="advanced-options" style="display: none;">
             <div class="form-row">
               <div class="form-group-small">
@@ -294,7 +294,7 @@ function getHTMLBody() {
                   <option value="HOTP">HOTP (计数器基准)</option>
                 </select>
               </div>
-              
+
               <div class="form-group-small" id="digitsGroup">
                 <label for="secretDigits">🔢 位数</label>
                 <select id="secretDigits">
@@ -303,7 +303,7 @@ function getHTMLBody() {
                 </select>
               </div>
             </div>
-            
+
             <div class="form-row">
               <div class="form-group-small" id="periodGroup">
                 <label for="secretPeriod">⏱️ 周期(秒)</label>
@@ -313,7 +313,7 @@ function getHTMLBody() {
                   <option value="120">120秒</option>
                 </select>
               </div>
-              
+
               <div class="form-group-small" id="algorithmGroup">
                 <label for="secretAlgorithm">🔧 算法</label>
                 <select id="secretAlgorithm">
@@ -323,20 +323,20 @@ function getHTMLBody() {
                 </select>
               </div>
             </div>
-            
+
             <div class="form-row" id="counterRow" style="display: none;">
               <div class="form-group-small" id="counterGroup">
                 <label for="secretCounter">📊 计数器</label>
                 <input type="number" id="secretCounter" value="0" min="0" step="1" placeholder="初始计数器值" autocomplete="off">
               </div>
             </div>
-            
+
             <div class="advanced-info" id="advancedInfo">
               大多数2FA应用使用默认设置：TOTP、6位、30秒、SHA1算法
             </div>
           </div>
         </div>
-        
+
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="hideSecretModal()">取消</button>
           <button type="submit" class="btn btn-primary" id="submitBtn">保存</button>
@@ -431,14 +431,14 @@ function getHTMLBody() {
         <h2>🔄 还原配置</h2>
         <button class="close-btn" onclick="hideRestoreModal()">&times;</button>
       </div>
-      
+
       <div class="restore-instructions">
         <p>🔄 从备份中选择一个配置进行还原：</p>
         <p>
           ⚠️ 警告：还原操作将覆盖当前所有密钥，请谨慎操作！
         </p>
       </div>
-      
+
       <div class="restore-content">
         <div class="backup-list-container">
           <div class="backup-list-header">
@@ -456,7 +456,7 @@ function getHTMLBody() {
             <button type="button" class="btn btn-danger" onclick="deleteAllBackups()" id="deleteAllBackupsBtn" disabled style="padding: 8px 16px; font-size: 12px;">🧹 删除全部</button>
           </div>
         </div>
-        
+
         <div class="restore-preview" id="restorePreview" style="display: none;">
           <div class="preview-header">
             <span>📋 备份预览</span>
@@ -466,14 +466,14 @@ function getHTMLBody() {
           </div>
         </div>
       </div>
-      
+
       <div class="modal-actions">
         <button type="button" class="btn btn-outline" onclick="hideRestoreModal()" style="padding: 12px 20px; border-radius: 8px; font-size: 14px;">❌ 取消</button>
         <button type="button" class="btn btn-danger" onclick="confirmRestore()" id="confirmRestoreBtn" disabled style="padding: 12px 20px; border-radius: 8px; font-size: 14px;">🔄 确认还原</button>
       </div>
     </div>
   </div>
-  
+
   <!-- 实用工具模态框 -->
   <div id="toolsModal" class="modal">
     <div class="modal-content">
@@ -481,7 +481,7 @@ function getHTMLBody() {
         <h2>🔧 实用工具</h2>
         <button class="close-btn" onclick="hideToolsModal()">&times;</button>
       </div>
-      
+
       <div class="tools-list">
         <div class="tool-item" onclick="showQRScanAndDecode()">
           <div class="tool-icon">🔍</div>
@@ -490,7 +490,7 @@ function getHTMLBody() {
             <div class="tool-desc">扫描并显示二维码内容</div>
           </div>
         </div>
-        
+
         <div class="tool-item" onclick="showQRGenerateTool()">
           <div class="tool-icon">🔄</div>
           <div class="tool-content">
@@ -549,7 +549,7 @@ function getHTMLBody() {
         <h2>🔄 二维码生成</h2>
         <button class="close-btn" onclick="hideQRGenerateModal()">&times;</button>
       </div>
-      
+
       <div class="tool-section">
         <div class="section-title">输入内容</div>
         <div class="input-area">
@@ -563,7 +563,7 @@ function getHTMLBody() {
           ></textarea>
         </div>
       </div>
-      
+
       <div class="tool-section" id="qrResultSection" style="display: none;">
         <div class="section-title">生成的二维码</div>
         <div class="qr-display">
@@ -571,13 +571,13 @@ function getHTMLBody() {
           <div class="qr-tip" style="margin-top: 10px; font-size: 12px; color: var(--text-tertiary);">长按保存图片</div>
         </div>
       </div>
-      
+
       <div class="form-actions" style="margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border-primary); display: flex; justify-content: center;">
         <button type="button" class="btn btn-primary" onclick="generateQRCode()" style="padding: 12px 20px; border-radius: 8px; font-size: 14px;">🔄 生成二维码</button>
       </div>
     </div>
   </div>
-  
+
   <!-- Base32编解码工具模态框 -->
   <div id="base32Modal" class="modal">
     <div class="modal-content">
@@ -585,7 +585,7 @@ function getHTMLBody() {
         <h2>🔐 Base32 编解码</h2>
         <button class="close-btn" onclick="hideBase32Modal()">&times;</button>
       </div>
-      
+
       <div class="tool-section">
         <div class="section-title">Base32 编码</div>
         <div class="input-area">
@@ -603,9 +603,9 @@ function getHTMLBody() {
           <div id="encodedResult" class="result-text" style="margin-top: 10px; padding: 10px; background: var(--bg-secondary); border-radius: 6px; font-family: monospace; font-size: 13px; min-height: 0; word-break: break-all; display: none; color: var(--text-primary);"></div>
         </div>
       </div>
-      
+
       <div class="divider" style="height: 1px; background: var(--border-primary); margin: 20px 0;"></div>
-      
+
       <div class="tool-section">
         <div class="section-title">Base32 解码</div>
         <div class="input-area">
@@ -623,11 +623,11 @@ function getHTMLBody() {
           <div id="decodedResult" class="result-text" style="margin-top: 10px; padding: 10px; background: var(--bg-secondary); border-radius: 6px; font-family: monospace; font-size: 13px; min-height: 0; word-break: break-all; display: none; color: var(--text-primary);"></div>
         </div>
       </div>
-      
+
 
     </div>
   </div>
-  
+
   <!-- 时间戳工具模态框 -->
   <div id="timestampModal" class="modal">
     <div class="modal-content">
@@ -635,7 +635,7 @@ function getHTMLBody() {
         <h2>⏱️ 时间戳工具</h2>
         <button class="close-btn" onclick="hideTimestampModal()">&times;</button>
       </div>
-      
+
       <div class="tool-section">
         <div class="section-title">TOTP 时间信息</div>
         <div class="time-info" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
@@ -660,7 +660,7 @@ function getHTMLBody() {
           <div id="progressBar" class="progress" style="height: 100%; background: var(--progress-fill); transition: width 0.3s ease;"></div>
         </div>
       </div>
-      
+
       <div class="tool-section">
         <div class="section-title">时间周期设置</div>
         <div class="period-selector" style="display: flex; justify-content: space-between; gap: 10px;">
@@ -669,11 +669,11 @@ function getHTMLBody() {
           <button class="btn btn-outline" id="period120Btn" onclick="setPeriod(120)" style="padding: 8px 16px; font-size: 13px; border: 2px solid var(--border-primary); background: transparent; border-radius: 6px; color: var(--text-primary);">120秒</button>
         </div>
       </div>
-      
+
 
     </div>
   </div>
-  
+
   <!-- 密钥检查器模态框 -->
   <div id="keyCheckModal" class="modal">
     <div class="modal-content">
@@ -681,7 +681,7 @@ function getHTMLBody() {
         <h2>✅ 密钥检查器</h2>
         <button class="close-btn" onclick="hideKeyCheckModal()">&times;</button>
       </div>
-      
+
       <div class="tool-section">
         <div class="section-title">密钥检查</div>
         <div class="input-area">
@@ -695,18 +695,18 @@ function getHTMLBody() {
           <button class="btn btn-primary" onclick="checkSecret()" style="margin-top: 10px; padding: 10px 20px; font-size: 14px;">检查密钥</button>
         </div>
       </div>
-      
+
       <div class="tool-section" id="keyCheckResult" style="display: none;">
         <div class="section-title">检查结果</div>
         <div id="checkResultContent" class="check-result" style="padding: 15px; border-radius: 8px; margin-bottom: 15px;">
           <!-- 结果内容将在这里动态生成 -->
         </div>
       </div>
-      
+
 
     </div>
   </div>
-  
+
   <!-- 二维码解析工具模态框 -->
   <div id="qrDecodeModal" class="modal">
     <div class="modal-content">
@@ -714,14 +714,14 @@ function getHTMLBody() {
         <h2>🔍 二维码解析</h2>
         <button class="close-btn" onclick="hideQRDecodeModal()">&times;</button>
       </div>
-      
+
       <div class="tool-section">
         <div class="section-title">扫描二维码</div>
         <div class="scan-options" style="display: flex; gap: 10px; margin-bottom: 15px;">
           <button class="btn btn-primary" onclick="startQRDecodeScanner()" style="flex: 1; padding: 12px; font-size: 14px;">📷 摄像头扫描</button>
           <button class="btn btn-info" onclick="uploadImageForDecode()" style="flex: 1; padding: 12px; font-size: 14px;">📁 选择图片</button>
         </div>
-        
+
         <div id="decodeScannerContainer" style="display: none;">
           <div class="scanner-container" style="position: relative; margin: 15px 0;">
             <div class="video-wrapper">
@@ -738,7 +738,7 @@ function getHTMLBody() {
           </div>
         </div>
       </div>
-      
+
       <div class="tool-section" id="decodeResultSection" style="display: none;">
         <div class="section-title">解析结果</div>
         <div class="decode-result" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
@@ -754,11 +754,11 @@ function getHTMLBody() {
           <div class="qr-tip" style="margin-top: 8px; font-size: 12px; color: var(--text-tertiary);">点击二维码可以预览</div>
         </div>
       </div>
-      
+
 
     </div>
   </div>
-  
+
   <!-- 密钥生成器模态框 -->
   <div id="keyGeneratorModal" class="modal">
     <div class="modal-content">
@@ -766,7 +766,7 @@ function getHTMLBody() {
         <h2>🎲 密钥生成器</h2>
         <button class="close-btn" onclick="hideKeyGeneratorModal()">&times;</button>
       </div>
-      
+
       <div class="tool-section">
         <div class="options" style="margin-bottom: 15px;">
           <div class="option-item" style="margin-bottom: 10px;">
@@ -780,7 +780,7 @@ function getHTMLBody() {
         </div>
         <button class="btn btn-primary" onclick="generateKey()" style="width: 100%; padding: 12px; font-size: 14px;">生成密钥</button>
       </div>
-      
+
       <div class="tool-section" id="keyResultSection" style="display: none;">
         <div class="section-title">生成结果</div>
         <div class="key-result" style="padding: 15px; border-radius: 8px; margin-bottom: 15px; background: var(--bg-secondary);">
@@ -790,11 +790,11 @@ function getHTMLBody() {
           </div>
         </div>
       </div>
-      
+
 
     </div>
   </div>
-  
+
   <!-- 密钥验证码工具模态框 -->
   <div id="secretOtpModal" class="modal">
     <div class="modal-content">
@@ -870,15 +870,15 @@ function getHTMLBody() {
         <h2 id="qrTitle">二维码</h2>
         <button class="close-btn" onclick="hideQRModal()">&times;</button>
       </div>
-      
+
       <div class="qr-subtitle-section">
         <p id="qrSubtitle">扫描此二维码导入到其他2FA应用</p>
       </div>
-      
+
       <div class="qr-code-container">
         <!-- 二维码将在这里动态生成 -->
       </div>
-      
+
       <div class="qr-info">
         💡 使用任意2FA应用扫描二维码即可添加此账户<br>
         支持：Google Authenticator、Microsoft Authenticator、Authy等
@@ -1318,23 +1318,23 @@ function getHTMLBody() {
   <footer class="page-footer">
     <div class="footer-content">
       <div class="footer-links">
-        <a href="https://github.com/wuzf/2fa" target="_blank" rel="noopener noreferrer" class="footer-link">
+        <a href="https://github.com/vfhky/2fa" target="_blank" rel="noopener noreferrer" class="footer-link">
           <svg class="github-icon" viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
           </svg>
           GitHub
         </a>
         <span class="footer-separator">•</span>
-        <a href="https://github.com/wuzf/2fa/issues" target="_blank" rel="noopener noreferrer" class="footer-link">
+        <a href="https://github.com/vfhky/2fa/issues" target="_blank" rel="noopener noreferrer" class="footer-link">
           反馈问题
         </a>
         <span class="footer-separator">•</span>
-        <a href="https://github.com/wuzf/2fa/blob/main/README.md" target="_blank" rel="noopener noreferrer" class="footer-link">
+        <a href="https://github.com/vfhky/2fa/blob/main/README.md" target="_blank" rel="noopener noreferrer" class="footer-link">
           使用文档
         </a>
       </div>
       <div class="footer-info">
-        Made with ❤️ by <a href="https://github.com/wuzf" target="_blank" rel="noopener noreferrer" class="footer-link">wuzf</a>
+        Made with ❤️ by <a href="https://github.com/vfhky" target="_blank" rel="noopener noreferrer" class="footer-link">wuzf & vfhky</a>
       </div>
     </div>
   </footer>

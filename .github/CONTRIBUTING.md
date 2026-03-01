@@ -8,7 +8,7 @@
 
 如果你发现了 Bug，请：
 
-1. 检查 [Issues](https://github.com/wuzf/2fa/issues) 中是否已有类似问题
+1. 检查 [Issues](https://github.com/vfhky/2fa/issues) 中是否已有类似问题
 2. 如果没有，创建新的 Issue，使用 "Bug 报告" 模板
 3. 提供详细的复现步骤、环境信息和截图
 
@@ -16,7 +16,7 @@
 
 如果你有新功能的想法：
 
-1. 查看现有的 [Feature Requests](https://github.com/wuzf/2fa/labels/enhancement)
+1. 查看现有的 [Feature Requests](https://github.com/vfhky/2fa/labels/enhancement)
 2. 创建新的 Issue，使用 "功能请求" 模板
 3. 清楚描述功能的用途和预期收益
 
@@ -95,7 +95,7 @@
 如果发现安全漏洞，请：
 
 1. **不要**公开披露
-2. 通过 [GitHub Security Advisories](https://github.com/wuzf/2fa/security/advisories/new) 私密报告
+2. 通过 [GitHub Security Advisories](https://github.com/vfhky/2fa/security/advisories/new) 私密报告
 3. 或发送邮件到项目维护者
 
 ### 安全最佳实践
@@ -118,4 +118,4 @@
 
 ---
 
-再次感谢你的贡献！如有任何疑问，请查看 [项目文档](../README.md) 或在 [Discussions](https://github.com/wuzf/2fa/discussions) 中提问。
+再次感谢你的贡献！如有任何疑问，请查看 [项目文档](../README.md) 或在 [Discussions](https://github.com/vfhky/2fa/discussions) 中提问。

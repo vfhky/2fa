@@ -3,7 +3,7 @@ name: 功能请求
 about: 为这个项目建议一个新功能
 title: '[FEATURE] '
 labels: ['enhancement']
-assignees: ['wuzf']
+assignees: ['vfhky']
 ---
 
 ## 功能描述

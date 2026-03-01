@@ -70,7 +70,7 @@ async function buildRelease() {
  * @build ${buildDate}
  *
  * This is a bundled release version for easy deployment.
- * For source code, visit: https://github.com/wuzf/2fa
+ * For source code, visit: https://github.com/vfhky/2fa
  */
 `,
       },
@@ -101,7 +101,7 @@ async function buildRelease() {
       buildDate: buildDate,
       minified: shouldMinify,
       fileSizeKB: parseFloat(fileSizeKB),
-      repository: packageJson.repository?.url || 'https://github.com/wuzf/2fa',
+      repository: packageJson.repository?.url || 'https://github.com/vfhky/2fa',
     };
 
     writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
@@ -186,9 +186,9 @@ wrangler secret put ENCRYPTION_KEY
 
 ## 📚 更多信息
 
-- [项目主页](https://github.com/wuzf/2fa)
-- [完整文档](https://github.com/wuzf/2fa/blob/main/README.md)
-- [部署指南](https://github.com/wuzf/2fa/blob/main/docs/DEPLOYMENT.md)
+- [项目主页](https://github.com/vfhky/2fa)
+- [完整文档](https://github.com/vfhky/2fa/blob/main/README.md)
+- [部署指南](https://github.com/vfhky/2fa/blob/main/docs/DEPLOYMENT.md)
 
 ## 📝 版本信息
 

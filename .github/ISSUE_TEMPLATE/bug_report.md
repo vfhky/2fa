@@ -3,7 +3,7 @@ name: Bug 报告
 about: 报告项目中的 Bug
 title: '[BUG] '
 labels: ['bug']
-assignees: ['wuzf']
+assignees: ['vfhky']
 ---
 
 ## Bug 描述

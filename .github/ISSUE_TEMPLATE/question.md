@@ -3,7 +3,7 @@ name: 问题/疑问
 about: 提出使用中遇到的问题或疑问
 title: '[QUESTION] '
 labels: ['question']
-assignees: ['wuzf']
+assignees: ['vfhky']
 ---
 
 ## 问题描述
