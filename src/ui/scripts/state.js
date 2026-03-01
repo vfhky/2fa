@@ -13,7 +13,6 @@ export function getStateCode() {
     let scannerCanvas = null;
     let scannerContext = null;
     let isScanning = false;
-    let scanInterval = null;
     let editingId = null;
     let otpIntervals = {};
     let currentOTPAuthURL = '';

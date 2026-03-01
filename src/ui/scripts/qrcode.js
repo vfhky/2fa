@@ -40,6 +40,119 @@ export function getQRCodeCode() {
     // 预加载 paulmillr/qr 解码器
     loadPaulmillrDecoder();
 
+    // 共享摄像头启动函数：polyfill、设备检测、配置尝试、视频播放
+    async function openCameraStream(video) {
+      // 检查浏览器支持 - 增强iPad兼容性
+      if (!navigator.mediaDevices) {
+        if (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia) {
+          navigator.mediaDevices = {};
+          navigator.mediaDevices.getUserMedia = function(constraints) {
+            const getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+            if (!getUserMedia) {
+              return Promise.reject(new Error('getUserMedia is not implemented in this browser'));
+            }
+            return new Promise((resolve, reject) => {
+              getUserMedia.call(navigator, constraints, resolve, reject);
+            });
+          };
+        } else {
+          throw new Error('您的浏览器不支持摄像头功能，请使用现代浏览器');
+        }
+      }
+
+      if (!navigator.mediaDevices.getUserMedia) {
+        throw new Error('您的浏览器不支持摄像头功能，请使用现代浏览器');
+      }
+
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const isIPad = /iPad/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+      let configs;
+      if (isIPad || isIOS) {
+        configs = [
+          { video: { facingMode: 'environment', width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 } } },
+          { video: { facingMode: 'user', width: { ideal: 480, max: 640 }, height: { ideal: 360, max: 480 } } },
+          { video: { width: { ideal: 640 }, height: { ideal: 480 } } },
+          { video: true }
+        ];
+      } else {
+        configs = [
+          { video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } } },
+          { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } },
+          { video: true }
+        ];
+      }
+
+      let stream = null;
+      for (let i = 0; i < configs.length; i++) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(configs[i]);
+          break;
+        } catch (e) {
+          if (i === configs.length - 1) {
+            throw e;
+          }
+        }
+      }
+
+      if (!stream) {
+        throw new Error('无法获取摄像头访问权限');
+      }
+
+      video.srcObject = stream;
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('摄像头加载超时'));
+        }, 10000);
+
+        video.onloadedmetadata = () => {
+          clearTimeout(timeout);
+          video.play().then(resolve).catch(reject);
+        };
+
+        video.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error('摄像头播放失败'));
+        };
+      });
+
+      return stream;
+    }
+
+    // 共享摄像头错误消息映射
+    function getCameraErrorMessage(err) {
+      const isIPad = /iPad/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+      if (err.name === 'NotAllowedError') {
+        return isIPad
+          ? 'iPad 摄像头权限被拒绝。请在 Safari 设置中允许摄像头访问，或尝试在地址栏点击"aA"图标允许摄像头权限'
+          : '摄像头权限被拒绝，请在浏览器设置中允许摄像头访问';
+      }
+      if (err.name === 'NotFoundError') {
+        return isIPad
+          ? 'iPad 未找到摄像头设备，请确保在系统设置中允许浏览器访问摄像头'
+          : '未找到摄像头设备，请确保设备连接正常';
+      }
+      if (err.name === 'NotReadableError') {
+        return isIPad
+          ? 'iPad 摄像头被其他应用占用，请关闭其他摄像头应用后重试'
+          : '摄像头被其他应用占用，请关闭其他摄像头应用';
+      }
+      if (err.name === 'OverconstrainedError') {
+        return isIPad
+          ? 'iPad 摄像头不支持请求的配置，正在尝试兼容模式...'
+          : '摄像头不支持请求的配置，请尝试其他设备';
+      }
+      if (err.message && err.message.includes('getUserMedia is not implemented')) {
+        return '您的浏览器版本过旧，请更新到最新版本的 Safari 或 Chrome';
+      }
+      if (location.protocol !== 'https:') {
+        return '摄像头功能需要HTTPS协议，请使用 https:// 访问';
+      }
+      return '摄像头启动失败: ' + err.message;
+    }
+
     // 切换连续扫描模式
     function toggleContinuousScan() {
       const toggle = document.getElementById('continuousScanToggle');
@@ -197,49 +310,44 @@ export function getQRCodeCode() {
 
     // 显示二维码扫描器
     function showQRScanner() {
-      const modal = document.getElementById('qrScanModal');
-      modal.style.display = 'flex';
-      setTimeout(() => modal.classList.add('show'), 10);
+      showModal('qrScanModal', () => {
+        // 重置连续扫描状态
+        continuousScanMode = false;
+        continuousScanCount = 0;
+        const toggle = document.getElementById('continuousScanToggle');
+        if (toggle) toggle.checked = false;
+        const counter = document.getElementById('scanCounter');
+        if (counter) {
+          counter.style.display = 'none';
+          document.getElementById('scanCountNum').textContent = '0';
+        }
 
-      // 重置连续扫描状态
-      continuousScanMode = false;
-      continuousScanCount = 0;
-      const toggle = document.getElementById('continuousScanToggle');
-      if (toggle) toggle.checked = false;
-      const counter = document.getElementById('scanCounter');
-      if (counter) {
-        counter.style.display = 'none';
-        document.getElementById('scanCountNum').textContent = '0';
-      }
-
-      startQRScanner();
-      disableBodyScroll();
+        startQRScanner();
+      });
     }
 
     // 隐藏二维码扫描器
     function hideQRScanner() {
-      const modal = document.getElementById('qrScanModal');
-      modal.classList.remove('show');
-      setTimeout(() => modal.style.display = 'none', 300);
-      stopQRScanner();
-      enableBodyScroll();
+      hideModal('qrScanModal', () => {
+        stopQRScanner();
 
-      // 重置连续扫描状态
-      continuousScanMode = false;
-      continuousScanCount = 0;
-      const toggle = document.getElementById('continuousScanToggle');
-      if (toggle) toggle.checked = false;
-      const counter = document.getElementById('scanCounter');
-      if (counter) {
-        counter.style.display = 'none';
-        document.getElementById('scanCountNum').textContent = '0';
-      }
+        // 重置连续扫描状态
+        continuousScanMode = false;
+        continuousScanCount = 0;
+        const toggle = document.getElementById('continuousScanToggle');
+        if (toggle) toggle.checked = false;
+        const counter = document.getElementById('scanCounter');
+        if (counter) {
+          counter.style.display = 'none';
+          document.getElementById('scanCountNum').textContent = '0';
+        }
 
-      // 重置文件输入框，确保下次可以选择同一个文件
-      const fileInput = document.getElementById('qrImageInput');
-      if (fileInput) {
-        fileInput.value = '';
-      }
+        // 重置文件输入框，确保下次可以选择同一个文件
+        const fileInput = document.getElementById('qrImageInput');
+        if (fileInput) {
+          fileInput.value = '';
+        }
+      });
     }
 
     // 启动二维码扫描器
@@ -253,144 +361,13 @@ export function getQRCodeCode() {
         status.textContent = '正在启动摄像头...';
         status.style.display = 'block';
 
-        // 检查浏览器支持 - 增强iPad兼容性
-        if (!navigator.mediaDevices) {
-          // 尝试 polyfill for older browsers
-          if (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia) {
-            // 为旧版浏览器创建 polyfill
-            navigator.mediaDevices = {};
-            navigator.mediaDevices.getUserMedia = function(constraints) {
-              const getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
-              if (!getUserMedia) {
-                return Promise.reject(new Error('getUserMedia is not implemented in this browser'));
-              }
-              return new Promise((resolve, reject) => {
-                getUserMedia.call(navigator, constraints, resolve, reject);
-              });
-            };
-          } else {
-            throw new Error('您的浏览器不支持摄像头功能，请使用现代浏览器');
-          }
-        }
-
-        if (!navigator.mediaDevices.getUserMedia) {
-          throw new Error('您的浏览器不支持摄像头功能，请使用现代浏览器');
-        }
-
-        // iPad 特殊处理：检查设备类型和权限
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-        const isIPad = /iPad/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-        console.log('设备检测:', {
-          userAgent: navigator.userAgent,
-          isIOS,
-          isIPad,
-          platform: navigator.platform,
-          maxTouchPoints: navigator.maxTouchPoints
-        });
-
         // 停止之前的流（如果存在）
         if (scanStream) {
           scanStream.getTracks().forEach(track => track.stop());
           scanStream = null;
         }
 
-        // 尝试不同的摄像头配置 - iPad 优化
-        let configs;
-
-        if (isIPad || isIOS) {
-          // iPad/iOS 特殊配置
-          configs = [
-            {
-              video: {
-                facingMode: 'environment',
-                width: { ideal: 640, max: 1280 },  // 降低分辨率要求
-                height: { ideal: 480, max: 720 }
-              }
-            },
-            {
-              video: {
-                facingMode: 'user',
-                width: { ideal: 480, max: 640 },
-                height: { ideal: 360, max: 480 }
-              }
-            },
-            {
-              video: {
-                width: { ideal: 640 },
-                height: { ideal: 480 }
-              }
-            },
-            {
-              video: true  // 最简单的配置
-            }
-          ];
-        } else {
-          // 其他设备的标准配置
-          configs = [
-            {
-              video: {
-                facingMode: 'environment', // 后置摄像头
-                width: { ideal: 1280, max: 1920 },
-                height: { ideal: 720, max: 1080 }
-              }
-            },
-            {
-              video: {
-                facingMode: 'user', // 前置摄像头
-                width: { ideal: 640 },
-                height: { ideal: 480 }
-              }
-            },
-            {
-              video: true // 默认摄像头
-            }
-          ];
-        }
-
-        let stream = null;
-        for (let i = 0; i < configs.length; i++) {
-          try {
-            console.log('尝试摄像头配置:', configs[i]);
-            stream = await navigator.mediaDevices.getUserMedia(configs[i]);
-            console.log('摄像头配置成功');
-            break;
-          } catch (e) {
-            console.warn('摄像头配置 ' + (i + 1) + ' 失败:', e.message);
-            if (i === configs.length - 1) {
-              throw e; // 最后一个配置也失败了，抛出错误
-            }
-          }
-        }
-
-        if (!stream) {
-          throw new Error('无法获取摄像头访问权限');
-        }
-
-        scanStream = stream;
-        video.srcObject = scanStream;
-
-        // 等待视频加载并播放
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('摄像头加载超时'));
-          }, 10000);
-
-          video.onloadedmetadata = () => {
-            clearTimeout(timeout);
-            video.play()
-              .then(() => {
-                console.log('摄像头启动成功，分辨率:', video.videoWidth + 'x' + video.videoHeight);
-                resolve();
-              })
-              .catch(reject);
-          };
-
-          video.onerror = () => {
-            clearTimeout(timeout);
-            reject(new Error('摄像头播放失败'));
-          };
-        });
+        scanStream = await openCameraStream(video);
 
         status.textContent = '';
         status.style.display = 'none';
@@ -398,76 +375,23 @@ export function getQRCodeCode() {
         scanFrameCounter = 0;
         lastScanAttemptAt = 0;
 
-        // 创建画布用于分析图像
         if (!scannerCanvas) {
           scannerCanvas = document.createElement('canvas');
           scannerContext = scannerCanvas.getContext('2d', { willReadFrequently: true });
-          console.log('画布创建成功');
         }
 
-        // 初始化 BarcodeDetector（如果可用）
         if (!cameraBarcodeDetector) {
           cameraBarcodeDetector = createBarcodeDetectorInstance();
-          if (cameraBarcodeDetector) {
-            console.log('摄像头扫描: BarcodeDetector 初始化成功');
-          }
         }
 
-        // 延迟开始扫描，确保视频稳定
         setTimeout(() => {
           if (isScanning) {
-            console.log('开始二维码扫描循环');
             scanForQRCode();
           }
         }, 500);
 
       } catch (err) {
-        console.error('启动摄像头失败:', err);
-        console.error('错误详情:', {
-          name: err.name,
-          message: err.message,
-          userAgent: navigator.userAgent,
-          isSecure: location.protocol === 'https:',
-          mediaDevicesSupport: !!navigator.mediaDevices,
-          getUserMediaSupport: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
-        });
-
-        let errorMsg = '摄像头启动失败: ' + err.message;
-
-        // iPad 特殊错误处理
-        const isIPad = /iPad/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-        if (err.name === 'NotAllowedError') {
-          if (isIPad) {
-            errorMsg = 'iPad 摄像头权限被拒绝。请在 Safari 设置中允许摄像头访问，或尝试在地址栏点击"aA"图标允许摄像头权限';
-          } else {
-            errorMsg = '摄像头权限被拒绝，请在浏览器设置中允许摄像头访问';
-          }
-        } else if (err.name === 'NotFoundError') {
-          if (isIPad) {
-            errorMsg = 'iPad 未找到摄像头设备，请确保在系统设置中允许浏览器访问摄像头';
-          } else {
-            errorMsg = '未找到摄像头设备，请确保设备连接正常';
-          }
-        } else if (err.name === 'NotReadableError') {
-          if (isIPad) {
-            errorMsg = 'iPad 摄像头被其他应用占用，请关闭其他摄像头应用后重试';
-          } else {
-            errorMsg = '摄像头被其他应用占用，请关闭其他摄像头应用';
-          }
-        } else if (err.name === 'OverconstrainedError') {
-          if (isIPad) {
-            errorMsg = 'iPad 摄像头不支持请求的配置，正在尝试兼容模式...';
-          } else {
-            errorMsg = '摄像头不支持请求的配置，请尝试其他设备';
-          }
-        } else if (err.message.includes('getUserMedia is not implemented')) {
-          errorMsg = '您的浏览器版本过旧，请更新到最新版本的 Safari 或 Chrome';
-        } else if (location.protocol !== 'https:') {
-          errorMsg = '摄像头功能需要HTTPS协议，请使用 https:// 访问';
-        }
-
-        showScannerError(errorMsg);
+        showScannerError(getCameraErrorMessage(err));
       }
     }
 
@@ -477,10 +401,6 @@ export function getQRCodeCode() {
       scanFrameCounter = 0;
       lastScanAttemptAt = 0;
       cameraBarcodeDetectorPending = false;
-      if (scanInterval) {
-        clearInterval(scanInterval);
-        scanInterval = null;
-      }
       if (scanStream) {
         scanStream.getTracks().forEach(track => track.stop());
         scanStream = null;
@@ -1173,7 +1093,6 @@ export function getQRCodeCode() {
       }
       qrDebugLog(debugEnabled, sourceName, 'paulmillr/qr未命中，回退jsQR');
 
-      qrDebugLog(debugEnabled, sourceName, 'BarcodeDetector未命中，回退jsQR');
       const jsQrResult = decodeQRCode(imageData, {
         deep: true,
         aggressive: aggressiveMode,

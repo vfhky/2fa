@@ -32,14 +32,12 @@ export function getQRGenerateToolCode() {
 
       try {
         let qrDataURL = null;
-        let generationMethod = 'unknown';
 
         // 使用客户端本地生成二维码（隐私安全）
         qrDataURL = await generateQRCodeDataURL(content, {
           width: 300,
           height: 300
         });
-        generationMethod = 'client_local';
 
         qrImage.src = qrDataURL;
         qrImage.onload = function() {
