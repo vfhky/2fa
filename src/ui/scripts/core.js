@@ -1734,12 +1734,12 @@ export function getCoreCode() {
     // 键盘快捷键
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') {
-        hideSecretModal();
-        hideQRModal();
-        hideQRScanner();
-        hideImportModal();
-        hideBatchDeleteModal();
-        hideStatsModal();
+        const modalClosed = typeof closeTopVisibleModal === 'function' ? closeTopVisibleModal() : false;
+        if (!modalClosed && typeof closeActionMenu === 'function') {
+          closeActionMenu();
+        }
+        e.preventDefault();
+        return;
       }
       
       if (e.ctrlKey && e.key === 'd') {

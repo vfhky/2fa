@@ -52,6 +52,50 @@ export function getUtilsCode() {
       enableBodyScroll();
     }
 
+    /**
+     * 关闭当前最上层可见模态框
+     * - 优先触发模态框内的关闭按钮，确保执行对应清理逻辑
+     * - 没有关闭按钮时回退到通用隐藏
+     * @returns {boolean} 是否关闭了模态框
+     */
+    function closeTopVisibleModal() {
+      const modals = Array.from(document.querySelectorAll('.modal'));
+      if (!modals.length) {
+        return false;
+      }
+
+      const visibleModals = modals.filter(function(modal) {
+        const style = window.getComputedStyle(modal);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+      });
+
+      for (let i = visibleModals.length - 1; i >= 0; i--) {
+        const modal = visibleModals[i];
+
+        // 登录弹窗不允许通过 ESC 关闭
+        if (modal.id === 'loginModal') {
+          continue;
+        }
+
+        const closeBtn = modal.querySelector('.close-btn');
+        if (closeBtn && typeof closeBtn.click === 'function') {
+          closeBtn.click();
+          return true;
+        }
+
+        modal.classList.remove('show');
+        setTimeout(function() {
+          if (modal.parentNode) {
+            modal.style.display = 'none';
+          }
+        }, 300);
+        enableBodyScroll();
+        return true;
+      }
+
+      return false;
+    }
+
     // ==================== 滚动控制函数 ====================
 
     /**

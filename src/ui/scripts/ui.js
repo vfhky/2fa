@@ -274,11 +274,6 @@ export function getUICode() {
       }
     }
 
-    // ESC键关闭菜单
-    document.addEventListener('keydown', function(event) {
-      if (event.key === 'Escape') {
-        closeActionMenu();
-      }
-    });
+    // ESC 统一由 core.js 中的全局键盘监听处理
 `;
 }
