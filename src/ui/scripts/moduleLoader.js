@@ -28,6 +28,12 @@ export function getModuleLoaderCode() {
       googleMigration: { loaded: false, loading: false, code: null }
     };
 
+    function createUnauthorizedModuleError() {
+      const error = new Error('登录状态已失效');
+      error.code = 'UNAUTHORIZED';
+      return error;
+    }
+
     /**
      * 加载模块
      * @param {string} moduleName - 模块名称
@@ -67,8 +73,12 @@ export function getModuleLoaderCode() {
         // 从服务器获取模块代码
         const response = await authenticatedFetch(\`/modules/\${moduleName}.js\`);
 
+        if (response.status === 401) {
+          throw createUnauthorizedModuleError();
+        }
+
         if (!response.ok) {
-          throw new Error(\`加载模块失败: \${response.statusText}\`);
+          throw new Error(\`加载模块失败: HTTP \${response.status}\`);
         }
 
         const code = await response.text();
@@ -86,6 +96,11 @@ export function getModuleLoaderCode() {
         hideLoadingToast();
 
       } catch (error) {
+        if (error && error.code === 'UNAUTHORIZED') {
+          hideLoadingToast();
+          throw error;
+        }
+
         console.error(\`❌ 加载模块 \${moduleName} 失败:\`, error);
         moduleLoadState[moduleName].loading = false;
         hideLoadingToast();
@@ -198,6 +213,9 @@ export function getModuleLoaderCode() {
             throw new Error(\`函数 \${functionName} 在模块 \${moduleName} 中未找到\`);
           }
         } catch (error) {
+          if (error && error.code === 'UNAUTHORIZED') {
+            return;
+          }
           console.error(\`调用 \${functionName} 失败:\`, error);
           showCenterToast(\`功能加载失败: \${error.message}\`, 'error');
         }

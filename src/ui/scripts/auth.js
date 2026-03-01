@@ -10,6 +10,7 @@
 export function getAuthCode() {
 	return `    // ========== 认证相关函数 ==========
     // 注意：现在使用 HttpOnly Cookie 存储 token，不再使用 localStorage
+    let isHandlingUnauthorized = false;
 
     // 获取存储的令牌（已弃用 - Cookie 自动管理）
     function getAuthToken() {
@@ -143,6 +144,7 @@ export function getAuthCode() {
         const data = await response.json();
 
         if (response.ok && data.success) {
+          isHandlingUnauthorized = false;
           // 登录成功 - token 已通过 HttpOnly Cookie 自动设置
           hideLoginModal();
 
@@ -187,6 +189,11 @@ export function getAuthCode() {
 
     // 处理未授权响应
     function handleUnauthorized() {
+      if (isHandlingUnauthorized) {
+        return;
+      }
+      isHandlingUnauthorized = true;
+
       clearAuthToken();
 
       // 清除缓存的密钥数据（安全考虑）
@@ -233,6 +240,12 @@ export function getAuthCode() {
       options.credentials = 'include'; // 自动携带 Cookie
       
       const response = await fetch(url, options);
+
+      // 统一处理 401：会话失效时触发登录流程
+      if (response.status === 401) {
+        handleUnauthorized();
+        return response;
+      }
       
       // 🔄 自动续期：检查响应头中是否有刷新标记
       if (response.headers.get('X-Token-Refresh-Needed') === 'true') {

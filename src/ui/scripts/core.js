@@ -122,14 +122,9 @@ export function getCoreCode() {
       });
 
 	    // 加载密钥列表
-	    async function loadSecrets() {
-	      try {
-	        const response = await authenticatedFetch('/api/secrets');
-
-        if (response.status === 401) {
-          handleUnauthorized();
-          return;
-        }
+		    async function loadSecrets() {
+		      try {
+		        const response = await authenticatedFetch('/api/secrets');
 
         if (!response.ok) {
           let errorMessage = response.statusText || ('HTTP ' + response.status);
@@ -1354,16 +1349,11 @@ export function getCoreCode() {
       hideModal('statsModal');
     }
 
-    async function refreshStatsData() {
-      try {
-        const response = await authenticatedFetch('/api/secrets/stats');
+	    async function refreshStatsData() {
+	      try {
+	        const response = await authenticatedFetch('/api/secrets/stats');
 
-        if (response.status === 401) {
-          handleUnauthorized();
-          return;
-        }
-
-        const result = await response.json();
+	        const result = await response.json();
         if (!response.ok) {
           throw new Error(result.message || result.error || '获取统计数据失败');
         }
