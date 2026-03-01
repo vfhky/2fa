@@ -312,6 +312,16 @@ export function getQRDecodeToolCode() {
         const file = event.target.files[0];
         if (!file) return;
 
+        if (!file.type.startsWith('image/')) {
+          showCenterToast('❌', '请选择图片文件');
+          return;
+        }
+
+        if (file.size > 10 * 1024 * 1024) {
+          showCenterToast('❌', '图片文件过大，请选择小于10MB的图片');
+          return;
+        }
+
         const reader = new FileReader();
         reader.onload = function(e) {
           const img = new Image();
@@ -320,22 +330,69 @@ export function getQRDecodeToolCode() {
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
 
-              canvas.width = img.width;
-              canvas.height = img.height;
-              ctx.drawImage(img, 0, 0);
+              // 限制最大尺寸以提高性能和识别率（与主模块一致）
+              let width = img.width;
+              let height = img.height;
+              const maxSize = 2200;
+
+              if (width > maxSize || height > maxSize) {
+                const ratio = Math.min(maxSize / width, maxSize / height);
+                width = Math.floor(width * ratio);
+                height = Math.floor(height * ratio);
+              }
+
+              canvas.width = width;
+              canvas.height = height;
+              ctx.imageSmoothingEnabled = false;
+              ctx.drawImage(img, 0, 0, width, height);
 
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const qrCode = typeof decodeUploadedQRCodeWithBitmapFallback === 'function'
-                ? await decodeUploadedQRCodeWithBitmapFallback(file, imageData, {
-                    aggressive: true,
-                    sourceName: '工具二维码图片上传'
-                  })
-                : (typeof decodeUploadedQRCode === 'function'
-                    ? await decodeUploadedQRCode(imageData, {
-                        aggressive: true,
-                        sourceName: '工具二维码图片上传'
-                      })
-                    : decodeQRCodeForTool(imageData, true, true));
+
+              // 复用主模块的完整解码管线（BarcodeDetector → paulmillr/qr → jsQR 增强）
+              let qrCode = null;
+              if (typeof decodeUploadedQRCodeWithBitmapFallback === 'function') {
+                qrCode = await decodeUploadedQRCodeWithBitmapFallback(file, imageData, {
+                  aggressive: true,
+                  sourceName: '工具二维码图片上传'
+                });
+              } else if (typeof decodeUploadedQRCode === 'function') {
+                qrCode = await decodeUploadedQRCode(imageData, {
+                  aggressive: true,
+                  sourceName: '工具二维码图片上传'
+                });
+              } else {
+                // 主模块不可用时的独立解码路径
+                // 1. BarcodeDetector
+                if (!qrCode && typeof BarcodeDetector !== 'undefined') {
+                  try {
+                    const detector = typeof createBarcodeDetectorInstance === 'function'
+                      ? createBarcodeDetectorInstance()
+                      : new BarcodeDetector({ formats: ['qr_code'] });
+                    if (detector) {
+                      const detections = await detector.detect(canvas);
+                      const value = typeof pickBarcodeDetectorValue === 'function'
+                        ? pickBarcodeDetectorValue(detections)
+                        : (Array.isArray(detections) && detections.length > 0 && detections[0].rawValue ? detections[0].rawValue.trim() : null);
+                      if (value) qrCode = value;
+                    }
+                  } catch (e) { /* ignore */ }
+                }
+
+                // 2. paulmillr/qr
+                if (!qrCode && typeof paulmillrDecodeQR !== 'undefined' && paulmillrDecodeQR) {
+                  try {
+                    const pmResult = typeof tryPaulmillrDecode === 'function'
+                      ? tryPaulmillrDecode(imageData, '')
+                      : paulmillrDecodeQR({ width: imageData.width, height: imageData.height, data: imageData.data });
+                    if (pmResult) qrCode = pmResult;
+                  } catch (e) { /* ignore */ }
+                }
+
+                // 3. jsQR
+                if (!qrCode) {
+                  qrCode = decodeQRCodeForTool(imageData, true, true);
+                }
+              }
 
               if (qrCode) {
                 processDecodeResult(qrCode);

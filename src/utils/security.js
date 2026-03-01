@@ -168,7 +168,7 @@ export function getSecurityHeaders(request, options = {}) {
 	headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
 
 	// 权限策略（限制浏览器功能访问）
-	headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()';
+	headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=(self)';
 
 	return headers;
 }

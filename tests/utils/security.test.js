@@ -185,7 +185,7 @@ describe('Security Utils', () => {
       expect(headers['X-Content-Type-Options']).toBe('nosniff');
       expect(headers['X-XSS-Protection']).toBe('1; mode=block');
       expect(headers['Referrer-Policy']).toBe('strict-origin-when-cross-origin');
-      expect(headers['Permissions-Policy']).toBe('geolocation=(), microphone=(), camera=()');
+      expect(headers['Permissions-Policy']).toBe('geolocation=(), microphone=(), camera=(self)');
     });
 
     it('不同源请求不应该包含 CORS headers', () => {
