@@ -16,9 +16,11 @@ export function getQRCodeCode() {
     let scanFrameCounter = 0;
     let lastScanAttemptAt = 0;
     const decodeAttemptWarningCache = new Set();
+    const barcodeDetectorWarningCache = new Set();
     const SCAN_MIN_INTERVAL_MS = 80;
     const DEEP_SCAN_INTERVAL = 4;
     const CENTER_CROP_RATIO = 0.72;
+    const UPLOAD_DETECT_MAX_SIDE = 2200;
 
     // 切换连续扫描模式
     function toggleContinuousScan() {
@@ -630,25 +632,57 @@ export function getQRCodeCode() {
     function getAggressiveRegionCandidates(imageData) {
       const width = imageData.width;
       const height = imageData.height;
-      const cropWidth = Math.max(96, Math.floor(width * 0.72));
-      const cropHeight = Math.max(96, Math.floor(height * 0.72));
+      const ratios = [0.78, 0.64, 0.5, 0.38];
+      const anchors = [
+        { x: 0.5, y: 0.5 },
+        { x: 0.5, y: 0 },
+        { x: 0.5, y: 1 },
+        { x: 0, y: 0.5 },
+        { x: 1, y: 0.5 },
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 1, y: 1 }
+      ];
+      const maxCandidates = 20;
+      const candidates = [imageData];
+      const seen = new Set();
 
-      if (cropWidth >= width || cropHeight >= height) {
-        return [imageData];
+      function addCandidate(startX, startY, cropWidth, cropHeight) {
+        if (candidates.length >= maxCandidates) {
+          return;
+        }
+        const x = Math.max(0, Math.min(width - 1, Math.floor(startX)));
+        const y = Math.max(0, Math.min(height - 1, Math.floor(startY)));
+        const w = Math.max(1, Math.min(width - x, Math.floor(cropWidth)));
+        const h = Math.max(1, Math.min(height - y, Math.floor(cropHeight)));
+        const key = x + ',' + y + ',' + w + ',' + h;
+        if (seen.has(key) || (w === width && h === height)) {
+          return;
+        }
+        seen.add(key);
+        candidates.push(extractRegionImageData(imageData, x, y, w, h));
       }
 
-      const startX = width - cropWidth;
-      const startY = height - cropHeight;
-      const midX = Math.floor(startX / 2);
-      const midY = Math.floor(startY / 2);
+      for (let r = 0; r < ratios.length; r++) {
+        if (candidates.length >= maxCandidates) {
+          break;
+        }
+        const ratio = ratios[r];
+        const cropWidth = Math.max(80, Math.floor(width * ratio));
+        const cropHeight = Math.max(80, Math.floor(height * ratio));
+        const maxX = Math.max(0, width - cropWidth);
+        const maxY = Math.max(0, height - cropHeight);
+        for (let a = 0; a < anchors.length; a++) {
+          if (candidates.length >= maxCandidates) {
+            break;
+          }
+          const anchor = anchors[a];
+          addCandidate(maxX * anchor.x, maxY * anchor.y, cropWidth, cropHeight);
+        }
+      }
 
-      return [
-        extractRegionImageData(imageData, 0, 0, cropWidth, cropHeight),
-        extractRegionImageData(imageData, startX, 0, cropWidth, cropHeight),
-        extractRegionImageData(imageData, 0, startY, cropWidth, cropHeight),
-        extractRegionImageData(imageData, startX, startY, cropWidth, cropHeight),
-        extractRegionImageData(imageData, midX, midY, cropWidth, cropHeight)
-      ];
+      return candidates;
     }
 
     function downscaleImageData(imageData, maxSide = 960) {
@@ -719,6 +753,112 @@ export function getQRCodeCode() {
       }
 
       return buildImageData(output, width, height);
+    }
+
+    function createCanvasFromImageData(imageData) {
+      const canvas = document.createElement('canvas');
+      canvas.width = imageData.width;
+      canvas.height = imageData.height;
+      const ctx = canvas.getContext('2d');
+      ctx.putImageData(imageData, 0, 0);
+      return canvas;
+    }
+
+    function logBarcodeDetectorWarning(stage, error) {
+      const reason = error && error.message ? error.message : 'unknown';
+      const key = stage + '|' + reason;
+      if (!barcodeDetectorWarningCache.has(key)) {
+        barcodeDetectorWarningCache.add(key);
+        console.warn('BarcodeDetector失败:', stage, reason);
+      }
+    }
+
+    function createBarcodeDetectorInstance() {
+      if (typeof BarcodeDetector === 'undefined') {
+        return null;
+      }
+
+      try {
+        return new BarcodeDetector({ formats: ['qr_code'] });
+      } catch (error) {
+        logBarcodeDetectorWarning('init_with_format', error);
+      }
+
+      try {
+        return new BarcodeDetector();
+      } catch (error) {
+        logBarcodeDetectorWarning('init_fallback', error);
+        return null;
+      }
+    }
+
+    function pickBarcodeDetectorValue(detections) {
+      if (!Array.isArray(detections)) {
+        return null;
+      }
+      for (let i = 0; i < detections.length; i++) {
+        const value = detections[i] && typeof detections[i].rawValue === 'string'
+          ? detections[i].rawValue.trim()
+          : '';
+        if (value) {
+          return value;
+        }
+      }
+      return null;
+    }
+
+    async function decodeQRCodeWithBarcodeDetector(imageData, aggressiveMode = false) {
+      const detector = createBarcodeDetectorInstance();
+      if (!detector) {
+        return null;
+      }
+
+      const candidates = [imageData];
+      if (aggressiveMode) {
+        const upscaled = upscaleImageData(imageData, 2, 2400);
+        if (upscaled !== imageData) {
+          candidates.push(upscaled);
+        }
+
+        const candidateBase = upscaled !== imageData ? upscaled : imageData;
+        const regionCandidates = getAggressiveRegionCandidates(candidateBase);
+        for (let i = 0; i < regionCandidates.length && candidates.length < 18; i++) {
+          const candidate = regionCandidates[i];
+          if (candidate !== candidateBase) {
+            candidates.push(candidate);
+          }
+        }
+      }
+
+      const maxSources = aggressiveMode ? 18 : 3;
+      for (let i = 0; i < candidates.length && i < maxSources; i++) {
+        const candidateCanvas = createCanvasFromImageData(candidates[i]);
+        try {
+          const detections = await detector.detect(candidateCanvas);
+          const value = pickBarcodeDetectorValue(detections);
+          if (value) {
+            return value;
+          }
+        } catch (error) {
+          logBarcodeDetectorWarning('detect', error);
+        }
+      }
+
+      return null;
+    }
+
+    async function decodeUploadedQRCode(imageData, options = {}) {
+      const aggressiveMode = options.aggressive !== false;
+      const sourceName = options.sourceName || '图片上传';
+
+      const barcodeResult = await decodeQRCodeWithBarcodeDetector(imageData, aggressiveMode);
+      if (barcodeResult) {
+        console.log('[' + sourceName + '] BarcodeDetector识别成功');
+        return barcodeResult;
+      }
+
+      console.log('[' + sourceName + '] BarcodeDetector未命中，回退jsQR');
+      return decodeQRCode(imageData, { deep: true, aggressive: aggressiveMode });
     }
 
     // 使用 jsQR 进行增强解码（快速路径 + 深度路径）
@@ -950,22 +1090,30 @@ export function getQRCodeCode() {
         const reader = new FileReader();
         reader.onload = function(e) {
           const img = new Image();
-          img.onload = function() {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+          img.onload = async function() {
+            try {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
 
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
+              canvas.width = img.width;
+              canvas.height = img.height;
+              ctx.drawImage(img, 0, 0);
 
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const qrCode = decodeQRCode(imageData, { deep: true, aggressive: true });
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const qrCode = await decodeUploadedQRCode(imageData, {
+                aggressive: true,
+                sourceName: '主扫码图片导入'
+              });
 
-            if (qrCode) {
-              hideQRScanner();
-              processScannedQRCode(qrCode);
-            } else {
-              showCenterToast('❌', '未在图片中找到二维码，请尝试其他图片');
+              if (qrCode) {
+                hideQRScanner();
+                processScannedQRCode(qrCode);
+              } else {
+                showCenterToast('❌', '未在图片中找到二维码，请尝试其他图片');
+              }
+            } catch (error) {
+              console.error('图片导入解析失败:', error);
+              showCenterToast('❌', '图片导入解析失败，请重试');
             }
           };
           img.src = e.target.result;
@@ -1019,28 +1167,25 @@ export function getQRCodeCode() {
           // 创建图片元素
           const img = new Image();
 
-          img.onload = function() {
+          img.onload = async function() {
             console.log('图片加载成功，尺寸:', img.width + 'x' + img.height);
 
             try {
-              // 检查jsQR库是否可用
-              if (typeof jsQR === 'undefined') {
-                throw new Error('二维码解析库未加载，请刷新页面重试');
-              }
-
               // 创建 canvas 来处理图片
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
 
               // 限制最大尺寸以提高性能
               let { width, height } = img;
-              const maxSize = 1000;
+              const maxSize = UPLOAD_DETECT_MAX_SIDE;
 
               if (width > maxSize || height > maxSize) {
                 const ratio = Math.min(maxSize / width, maxSize / height);
                 width = Math.floor(width * ratio);
                 height = Math.floor(height * ratio);
                 console.log('缩放图片到:', width + 'x' + height);
+              } else {
+                console.log('保持原始尺寸解析:', width + 'x' + height);
               }
 
               // 设置 canvas 尺寸
@@ -1055,8 +1200,11 @@ export function getQRCodeCode() {
               console.log('获取图像数据成功，像素数:', imageData.data.length / 4);
 
               // 尝试解析二维码（增强模式）
-              status.textContent = '正在解析二维码...';
-              const qrCode = decodeQRCode(imageData, { deep: true, aggressive: true });
+              status.textContent = '正在智能解析二维码...';
+              const qrCode = await decodeUploadedQRCode(imageData, {
+                aggressive: true,
+                sourceName: '主扫码图片上传'
+              });
 
               if (qrCode) {
                 status.textContent = '二维码解析成功！';

@@ -350,21 +350,31 @@ export function getQRDecodeToolCode() {
         const reader = new FileReader();
         reader.onload = function(e) {
           const img = new Image();
-          img.onload = function() {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+          img.onload = async function() {
+            try {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
 
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
+              canvas.width = img.width;
+              canvas.height = img.height;
+              ctx.drawImage(img, 0, 0);
 
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const qrCode = decodeQRCodeForTool(imageData, true, true);
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const qrCode = typeof decodeUploadedQRCode === 'function'
+                ? await decodeUploadedQRCode(imageData, {
+                    aggressive: true,
+                    sourceName: '工具二维码图片上传'
+                  })
+                : decodeQRCodeForTool(imageData, true, true);
 
-            if (qrCode) {
-              processDecodeResult(qrCode);
-            } else {
-              showCenterToast('❌', '未在图片中找到二维码，请尝试其他图片');
+              if (qrCode) {
+                processDecodeResult(qrCode);
+              } else {
+                showCenterToast('❌', '未在图片中找到二维码，请尝试其他图片');
+              }
+            } catch (error) {
+              console.error('工具模块图片解析失败:', error);
+              showCenterToast('❌', '图片解析失败，请重试');
             }
           };
           img.src = e.target.result;
