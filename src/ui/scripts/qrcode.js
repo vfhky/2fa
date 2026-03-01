@@ -523,14 +523,58 @@ export function getQRCodeCode() {
       requestAnimationFrame(scanForQRCode);
     }
 
-    function runJsQRAttempts(imageData, parseOptions) {
+    function describeImageData(imageData) {
+      return imageData.width + 'x' + imageData.height;
+    }
+
+    function maskQRCodeDataForLog(data) {
+      if (typeof data !== 'string') {
+        return '';
+      }
+      const normalized = data.trim();
+      if (!normalized) {
+        return '';
+      }
+      const previewLength = 96;
+      const preview = normalized.slice(0, previewLength);
+      if (normalized.length <= previewLength) {
+        return preview;
+      }
+      return preview + '...(' + normalized.length + ' chars)';
+    }
+
+    function qrDebugLog(enabled, sourceName, message, details) {
+      if (!enabled) {
+        return;
+      }
+      const prefix = '[QR调试][' + sourceName + '] ' + message;
+      if (typeof details === 'undefined') {
+        console.log(prefix);
+      } else {
+        console.log(prefix, details);
+      }
+    }
+
+    function runJsQRAttempts(imageData, parseOptions, debugTag = '', stepName = '') {
+      const debugEnabled = !!debugTag;
       for (let i = 0; i < parseOptions.length; i++) {
         const option = parseOptions[i];
         try {
           const result = jsQR(imageData.data, imageData.width, imageData.height, option);
           if (result && result.data) {
+            qrDebugLog(debugEnabled, debugTag, 'jsQR命中', {
+              step: stepName || 'unknown',
+              inversionAttempts: option.inversionAttempts || 'unknown',
+              size: describeImageData(imageData),
+              preview: maskQRCodeDataForLog(result.data)
+            });
             return result.data;
           }
+          qrDebugLog(debugEnabled, debugTag, 'jsQR未命中', {
+            step: stepName || 'unknown',
+            inversionAttempts: option.inversionAttempts || 'unknown',
+            size: describeImageData(imageData)
+          });
         } catch (error) {
           const reason = error && error.message ? error.message : 'unknown';
           const key = (option.inversionAttempts || 'unknown') + '|' + reason;
@@ -538,6 +582,12 @@ export function getQRCodeCode() {
             decodeAttemptWarningCache.add(key);
             console.warn('二维码解析选项失败:', option, reason);
           }
+          qrDebugLog(debugEnabled, debugTag, 'jsQR异常', {
+            step: stepName || 'unknown',
+            inversionAttempts: option.inversionAttempts || 'unknown',
+            size: describeImageData(imageData),
+            reason
+          });
         }
       }
       return null;
@@ -807,11 +857,15 @@ export function getQRCodeCode() {
       return null;
     }
 
-    async function decodeQRCodeWithBarcodeDetector(imageData, aggressiveMode = false) {
+    async function decodeQRCodeWithBarcodeDetector(imageData, aggressiveMode = false, debugOptions = null) {
+      const debugEnabled = !!(debugOptions && debugOptions.enabled);
+      const debugTag = debugOptions && debugOptions.tag ? debugOptions.tag : '图片上传';
       const detector = createBarcodeDetectorInstance();
       if (!detector) {
+        qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector不可用，跳过该路径');
         return null;
       }
+      qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector初始化成功');
 
       const candidates = [imageData];
       if (aggressiveMode) {
@@ -831,34 +885,85 @@ export function getQRCodeCode() {
       }
 
       const maxSources = aggressiveMode ? 18 : 3;
+      qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector候选集准备完成', {
+        sourceSize: describeImageData(imageData),
+        aggressiveMode,
+        candidateTotal: candidates.length,
+        maxSources
+      });
       for (let i = 0; i < candidates.length && i < maxSources; i++) {
-        const candidateCanvas = createCanvasFromImageData(candidates[i]);
+        const candidate = candidates[i];
+        const candidateCanvas = createCanvasFromImageData(candidate);
+        qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector开始尝试', {
+          candidateIndex: i + 1,
+          size: describeImageData(candidate)
+        });
         try {
           const detections = await detector.detect(candidateCanvas);
+          qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector尝试完成', {
+            candidateIndex: i + 1,
+            detectionCount: Array.isArray(detections) ? detections.length : 0
+          });
           const value = pickBarcodeDetectorValue(detections);
           if (value) {
+            qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector命中', {
+              candidateIndex: i + 1,
+              preview: maskQRCodeDataForLog(value)
+            });
             return value;
           }
         } catch (error) {
           logBarcodeDetectorWarning('detect', error);
+          qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector尝试异常', {
+            candidateIndex: i + 1,
+            reason: error && error.message ? error.message : 'unknown'
+          });
         }
       }
 
+      qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector路径未命中');
       return null;
     }
 
     async function decodeUploadedQRCode(imageData, options = {}) {
       const aggressiveMode = options.aggressive !== false;
       const sourceName = options.sourceName || '图片上传';
+      const debugEnabled = options.debug !== false;
 
-      const barcodeResult = await decodeQRCodeWithBarcodeDetector(imageData, aggressiveMode);
+      qrDebugLog(debugEnabled, sourceName, '开始图片二维码解析', {
+        size: describeImageData(imageData),
+        aggressiveMode,
+        hasBarcodeDetector: typeof BarcodeDetector !== 'undefined',
+        hasJsQR: typeof jsQR !== 'undefined'
+      });
+
+      const barcodeResult = await decodeQRCodeWithBarcodeDetector(
+        imageData,
+        aggressiveMode,
+        { enabled: debugEnabled, tag: sourceName }
+      );
       if (barcodeResult) {
-        console.log('[' + sourceName + '] BarcodeDetector识别成功');
+        qrDebugLog(debugEnabled, sourceName, 'BarcodeDetector识别成功', {
+          preview: maskQRCodeDataForLog(barcodeResult)
+        });
         return barcodeResult;
       }
 
-      console.log('[' + sourceName + '] BarcodeDetector未命中，回退jsQR');
-      return decodeQRCode(imageData, { deep: true, aggressive: aggressiveMode });
+      qrDebugLog(debugEnabled, sourceName, 'BarcodeDetector未命中，回退jsQR');
+      const jsQrResult = decodeQRCode(imageData, {
+        deep: true,
+        aggressive: aggressiveMode,
+        debugTag: sourceName,
+        debugEnabled
+      });
+      if (jsQrResult) {
+        qrDebugLog(debugEnabled, sourceName, 'jsQR识别成功', {
+          preview: maskQRCodeDataForLog(jsQrResult)
+        });
+      } else {
+        qrDebugLog(debugEnabled, sourceName, 'jsQR路径未命中');
+      }
+      return jsQrResult;
     }
 
     // 使用 jsQR 进行增强解码（快速路径 + 深度路径）
@@ -878,68 +983,80 @@ export function getQRCodeCode() {
           { inversionAttempts: 'attemptBoth' },
           { inversionAttempts: 'invertFirst' }
         ];
+        const debugTag = options.debugEnabled === false ? '' : (options.debugTag || '');
+
+        qrDebugLog(!!debugTag, debugTag, '开始jsQR增强解析', {
+          size: describeImageData(imageData),
+          deep: !!options.deep,
+          aggressive: !!options.aggressive
+        });
 
         // 快速路径：先全图，再中心区域
-        let result = runJsQRAttempts(imageData, quickOptions);
+        let result = runJsQRAttempts(imageData, quickOptions, debugTag, 'quick/full');
         if (result) return result;
 
         const centerImageData = extractCenterImageData(imageData, CENTER_CROP_RATIO);
         if (centerImageData !== imageData) {
-          result = runJsQRAttempts(centerImageData, quickOptions);
+          result = runJsQRAttempts(centerImageData, quickOptions, debugTag, 'quick/center');
           if (result) return result;
         }
 
         // 深度路径：仅周期性触发，避免实时扫描开销过大
         if (!options.deep) {
+          qrDebugLog(!!debugTag, debugTag, '深度解析未启用，结束');
           return null;
         }
 
         const optimizedImageData = downscaleImageData(imageData, 960);
         const contrastImageData = enhanceImageData(optimizedImageData, 'contrast');
-        result = runJsQRAttempts(contrastImageData, deepOptions);
+        result = runJsQRAttempts(contrastImageData, deepOptions, debugTag, 'deep/contrast');
         if (result) return result;
 
         const binaryImageData = enhanceImageData(optimizedImageData, 'binary');
-        result = runJsQRAttempts(binaryImageData, deepOptions);
+        result = runJsQRAttempts(binaryImageData, deepOptions, debugTag, 'deep/binary');
         if (result) return result;
 
         const optimizedCenterImageData = extractCenterImageData(optimizedImageData, CENTER_CROP_RATIO);
         const centerContrast = enhanceImageData(optimizedCenterImageData, 'contrastStrong');
-        result = runJsQRAttempts(centerContrast, deepOptions);
+        result = runJsQRAttempts(centerContrast, deepOptions, debugTag, 'deep/center-contrastStrong');
         if (result) return result;
 
         const centerBinary = enhanceImageData(optimizedCenterImageData, 'binaryAdaptive');
-        result = runJsQRAttempts(centerBinary, deepOptions);
+        result = runJsQRAttempts(centerBinary, deepOptions, debugTag, 'deep/center-binaryAdaptive');
         if (result) return result;
 
         // 静态图片导入时启用更激进策略（高密度/偏位 Google 迁移码）
         if (options.aggressive) {
           const upscaled = upscaleImageData(imageData, 2, 2200);
           if (upscaled !== imageData) {
-            result = runJsQRAttempts(upscaled, deepOptions);
+            result = runJsQRAttempts(upscaled, deepOptions, debugTag, 'aggressive/upscaled');
             if (result) return result;
 
             const upscaledCenter = extractCenterImageData(upscaled, 0.8);
-            result = runJsQRAttempts(upscaledCenter, deepOptions);
+            result = runJsQRAttempts(upscaledCenter, deepOptions, debugTag, 'aggressive/upscaled-center');
             if (result) return result;
           }
 
           const aggressiveCandidates = getAggressiveRegionCandidates(upscaled !== imageData ? upscaled : optimizedImageData);
+          qrDebugLog(!!debugTag, debugTag, '进入aggressive候选扫描', {
+            candidateCount: aggressiveCandidates.length
+          });
           for (let i = 0; i < aggressiveCandidates.length; i++) {
             const candidate = aggressiveCandidates[i];
-            result = runJsQRAttempts(candidate, deepOptions);
+            result = runJsQRAttempts(candidate, deepOptions, debugTag, 'aggressive/candidate-' + (i + 1));
             if (result) return result;
 
             const candidateContrast = enhanceImageData(candidate, 'contrastStrong');
-            result = runJsQRAttempts(candidateContrast, deepOptions);
+            result = runJsQRAttempts(candidateContrast, deepOptions, debugTag, 'aggressive/candidate-contrast-' + (i + 1));
             if (result) return result;
 
             const candidateBinary = enhanceImageData(candidate, 'binaryAdaptive');
-            result = runJsQRAttempts(candidateBinary, deepOptions);
+            result = runJsQRAttempts(candidateBinary, deepOptions, debugTag, 'aggressive/candidate-binary-' + (i + 1));
             if (result) return result;
           }
         }
 
+        qrDebugLog(!!debugTag, debugTag, 'jsQR增强解析结束，未命中');
         return null;
       } catch (error) {
         console.error('二维码解析失败:', error);
@@ -950,7 +1067,7 @@ export function getQRCodeCode() {
     // 处理扫描到的二维码
     function processScannedQRCode(qrCodeData) {
       try {
-        console.log('扫描到二维码:', qrCodeData);
+        console.log('扫描到二维码:', maskQRCodeDataForLog(qrCodeData));
 
         // 检查是否是 Google Authenticator 迁移格式
         if (qrCodeData.startsWith('otpauth-migration://')) {
@@ -1210,7 +1327,7 @@ export function getQRCodeCode() {
                 status.textContent = '二维码解析成功！';
                 status.style.color = '#4CAF50';
 
-                console.log('成功解析到二维码:', qrCode);
+                console.log('成功解析到二维码:', maskQRCodeDataForLog(qrCode));
 
                 // 处理解析到的二维码
                 setTimeout(() => {

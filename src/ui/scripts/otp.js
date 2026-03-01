@@ -358,8 +358,6 @@ export function getOTPCode() {
         const currentWindow = otpCalculator.getCurrentTimeWindow(timeStep);
         const nextWindow = otpCalculator.getNextTimeWindow(timeStep);
 
-        console.log('更新OTP:', secret.name, '当前时间窗口:', currentWindow, '下一个时间窗口:', nextWindow, '时间:', new Date(currentTime * 1000).toLocaleTimeString());
-
         // 并行计算当前和下一个OTP
         const [currentToken, nextToken] = await Promise.all([
           otpCalculator.calculateCurrentOTP(secret),
@@ -370,14 +368,12 @@ export function getOTPCode() {
         const otpElement = document.getElementById('otp-' + secretId);
         if (otpElement) {
           otpElement.textContent = currentToken;
-          console.log('当前OTP更新:', currentToken, '时间窗口:', currentWindow);
         }
 
         // 更新下一个OTP显示
         const nextOtpElement = document.getElementById('next-otp-' + secretId);
         if (nextOtpElement) {
           nextOtpElement.textContent = nextToken;
-          console.log('下一个OTP更新:', nextToken, '时间窗口:', nextWindow);
         }
       } catch (error) {
         console.error('更新OTP失败:', error);

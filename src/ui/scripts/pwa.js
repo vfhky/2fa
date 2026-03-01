@@ -278,12 +278,10 @@ export function getPWACode() {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         // 页面变为可见（从后台切回前台）
-        console.log('📱 页面恢复可见，刷新所有验证码');
-        
+
         // 立即刷新所有OTP验证码，确保时间同步
         if (typeof secrets !== 'undefined' && secrets && secrets.length > 0) {
-          console.log('🔄 正在刷新 ' + secrets.length + ' 个验证码...');
-          
+
           // 并发刷新所有验证码
           Promise.all(
             secrets.map(secret => {
@@ -292,15 +290,10 @@ export function getPWACode() {
               }
               return Promise.resolve();
             })
-          ).then(() => {
-            console.log('✅ 所有验证码已刷新完成');
-          }).catch(err => {
+          ).catch(err => {
             console.error('❌ 刷新验证码时出错:', err);
           });
         }
-      } else {
-        // 页面变为隐藏（切到后台）
-        console.log('📱 页面进入后台');
       }
     });
 
@@ -309,13 +302,11 @@ export function getPWACode() {
      * 某些浏览器在锁屏解锁时只会触发focus而不触发visibilitychange
      */
     window.addEventListener('focus', () => {
-      console.log('📱 窗口获得焦点');
-      
+
       // 延迟100ms执行，避免与visibilitychange重复
       setTimeout(() => {
         if (typeof secrets !== 'undefined' && secrets && secrets.length > 0) {
-          console.log('🔄 窗口焦点恢复，检查并刷新验证码');
-          
+
           secrets.forEach(secret => {
             if (typeof updateOTP === 'function') {
               updateOTP(secret.id);
@@ -326,19 +317,11 @@ export function getPWACode() {
     });
 
     /**
-     * 监听页面失去焦点事件
-     */
-    window.addEventListener('blur', () => {
-      console.log('📱 窗口失去焦点');
-    });
-
-    /**
      * 使用 Page Visibility API 监控页面活跃状态
      * 提供更详细的日志用于调试
      */
     if (typeof document.hidden !== 'undefined') {
-      console.log('✅ Page Visibility API 已启用');
-      console.log('📊 当前页面状态:', document.hidden ? '隐藏' : '可见');
+      // Page Visibility API 可用
     } else {
       console.warn('⚠️  浏览器不支持 Page Visibility API');
     }

@@ -114,7 +114,6 @@ export function getCoreCode() {
         // 页面加载后立即刷新所有OTP，确保时间同步
         setTimeout(() => {
           if (secrets && secrets.length > 0) {
-            console.log('页面加载完成，立即刷新所有OTP');
             secrets.forEach(secret => {
               updateOTP(secret.id);
             });
@@ -543,7 +542,6 @@ export function getCoreCode() {
 
       const perfEnd = performance.now();
       const duration = (perfEnd - perfStart).toFixed(2);
-      console.log('[性能优化] 当前页 ' + visibleSecrets.length + '个密钥的OTP并发计算完成，耗时: ' + duration + 'ms');
 
       visibleSecrets.forEach((secret) => {
         startOTPInterval(secret.id);
@@ -1782,7 +1780,6 @@ export function getCoreCode() {
       
       if (e.ctrlKey && e.key === 'r') {
         e.preventDefault();
-        console.log('Manually refreshing all OTP codes');
         secrets.forEach(secret => {
           updateOTP(secret.id);
         });
@@ -1869,7 +1866,6 @@ export function getCoreCode() {
 
         // 检查验证码是否为默认值（未初始化或更新失败）
         if (otpElement.textContent === '------') {
-          console.warn('⚠️  [安全检查] 发现未初始化的验证码:', secret.name);
           updateOTP(secret.id);
           return;
         }
@@ -1886,7 +1882,6 @@ export function getCoreCode() {
           const lastRefreshWindow = window[lastRefreshKey];
           
           if (lastRefreshWindow !== currentWindow) {
-            console.log('🔄 [安全检查] 时间窗口已切换，刷新验证码:', secret.name, '窗口:', currentWindow);
             updateOTP(secret.id);
             window[lastRefreshKey] = currentWindow;
           }

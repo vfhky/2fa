@@ -311,7 +311,10 @@ export function getQRDecodeToolCode() {
             const qrCode = decodeQRCodeForTool(imageData, deepMode, false);
 
             if (qrCode) {
-              console.log('二维码解析成功:', qrCode);
+              const preview = typeof maskQRCodeDataForLog === 'function'
+                ? maskQRCodeDataForLog(qrCode)
+                : (typeof qrCode === 'string' ? (qrCode.length > 96 ? qrCode.slice(0, 96) + '...(' + qrCode.length + ' chars)' : qrCode) : '');
+              console.log('二维码解析成功:', preview);
               processDecodeResult(qrCode);
               return;
             }
