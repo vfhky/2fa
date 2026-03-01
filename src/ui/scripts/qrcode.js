@@ -21,8 +21,24 @@ export function getQRCodeCode() {
     const DEEP_SCAN_INTERVAL = 4;
     const CENTER_CROP_RATIO = 0.72;
     const UPLOAD_DETECT_MAX_SIDE = 2200;
-    const QR_PIPELINE_VERSION = '2026-03-01-r7';
+    const QR_PIPELINE_VERSION = '2026-03-01-r8';
     let cameraBarcodeDetector = null;
+    let paulmillrDecodeQR = null;
+
+    async function loadPaulmillrDecoder() {
+      if (paulmillrDecodeQR) return paulmillrDecodeQR;
+      try {
+        const mod = await import('https://cdn.jsdelivr.net/npm/@paulmillr/qr@0.3.0/esm/decode.js');
+        paulmillrDecodeQR = mod.default || mod.decodeQR;
+        return paulmillrDecodeQR;
+      } catch (e) {
+        console.warn('paulmillr/qr 加载失败:', e);
+        return null;
+      }
+    }
+
+    // 预加载 paulmillr/qr 解码器
+    loadPaulmillrDecoder();
 
     // 切换连续扫描模式
     function toggleContinuousScan() {
@@ -538,6 +554,16 @@ export function getQRCodeCode() {
               });
             }
 
+            // paulmillr/qr 同步解码（快速、高精度）
+            if (paulmillrDecodeQR) {
+              const pmResult = tryPaulmillrDecode(imageData, '');
+              if (pmResult) {
+                console.log('paulmillr/qr摄像头扫描成功');
+                processScannedQRCode(pmResult);
+                return;
+              }
+            }
+
             // jsQR 同步解码作为补充/后备
             const qrCode = decodeQRCode(imageData, { deep: deepMode });
 
@@ -591,15 +617,17 @@ export function getQRCodeCode() {
 
     function runJsQRAttempts(imageData, parseOptions, debugTag = '', stepName = '') {
       const debugEnabled = !!debugTag;
+      const padded = addQuietZone(imageData);
       for (let i = 0; i < parseOptions.length; i++) {
         const option = parseOptions[i];
         try {
-          const result = jsQR(imageData.data, imageData.width, imageData.height, option);
+          const result = jsQR(padded.data, padded.width, padded.height, option);
           if (result && result.data) {
             qrDebugLog(debugEnabled, debugTag, 'jsQR命中', {
               step: stepName || 'unknown',
               inversionAttempts: option.inversionAttempts || 'unknown',
               size: describeImageData(imageData),
+              paddedSize: describeImageData(padded),
               preview: maskQRCodeDataForLog(result.data)
             });
             return result.data;
@@ -639,6 +667,75 @@ export function getQRCodeCode() {
       const newImageData = tempCtx.createImageData(width, height);
       newImageData.data.set(pixels);
       return newImageData;
+    }
+
+    function addQuietZone(imageData, padding) {
+      const w = imageData.width;
+      const h = imageData.height;
+      if (typeof padding !== 'number' || padding <= 0) {
+        padding = Math.max(40, Math.ceil(Math.max(w, h) * 0.1));
+      }
+      const newW = w + padding * 2;
+      const newH = h + padding * 2;
+      const output = new Uint8ClampedArray(newW * newH * 4);
+      // Fill with white (255,255,255,255)
+      for (let i = 0; i < output.length; i += 4) {
+        output[i] = 255;
+        output[i + 1] = 255;
+        output[i + 2] = 255;
+        output[i + 3] = 255;
+      }
+      // Copy original image centered
+      const src = imageData.data;
+      for (let y = 0; y < h; y++) {
+        const srcRowStart = y * w * 4;
+        const destRowStart = ((y + padding) * newW + padding) * 4;
+        for (let x = 0; x < w; x++) {
+          const si = srcRowStart + x * 4;
+          const di = destRowStart + x * 4;
+          output[di] = src[si];
+          output[di + 1] = src[si + 1];
+          output[di + 2] = src[si + 2];
+          output[di + 3] = src[si + 3];
+        }
+      }
+      return buildImageData(output, newW, newH);
+    }
+
+    function tryPaulmillrDecode(imageData, debugTag) {
+      if (!paulmillrDecodeQR) return null;
+      const debugEnabled = !!debugTag;
+      try {
+        // Try original first
+        const result = paulmillrDecodeQR({ width: imageData.width, height: imageData.height, data: imageData.data });
+        if (result) {
+          qrDebugLog(debugEnabled, debugTag || 'paulmillr', 'paulmillr/qr命中(原图)', {
+            size: describeImageData(imageData),
+            preview: maskQRCodeDataForLog(result)
+          });
+          return result;
+        }
+        // Try with quiet zone padding
+        const padded = addQuietZone(imageData);
+        const paddedResult = paulmillrDecodeQR({ width: padded.width, height: padded.height, data: padded.data });
+        if (paddedResult) {
+          qrDebugLog(debugEnabled, debugTag || 'paulmillr', 'paulmillr/qr命中(padding)', {
+            size: describeImageData(imageData),
+            paddedSize: describeImageData(padded),
+            preview: maskQRCodeDataForLog(paddedResult)
+          });
+          return paddedResult;
+        }
+        qrDebugLog(debugEnabled, debugTag || 'paulmillr', 'paulmillr/qr未命中', {
+          size: describeImageData(imageData)
+        });
+      } catch (e) {
+        qrDebugLog(debugEnabled, debugTag || 'paulmillr', 'paulmillr/qr异常', {
+          size: describeImageData(imageData),
+          reason: e && e.message ? e.message : 'unknown'
+        });
+      }
+      return null;
     }
 
     function extractRegionImageData(imageData, startX, startY, cropWidth, cropHeight) {
@@ -1047,7 +1144,8 @@ export function getQRCodeCode() {
         size: describeImageData(imageData),
         aggressiveMode,
         hasBarcodeDetector: typeof BarcodeDetector !== 'undefined',
-        hasJsQR: typeof jsQR !== 'undefined'
+        hasJsQR: typeof jsQR !== 'undefined',
+        hasPaulmillr: !!paulmillrDecodeQR
       });
 
       const barcodeResult = await decodeQRCodeWithBarcodeDetector(
@@ -1061,6 +1159,19 @@ export function getQRCodeCode() {
         });
         return barcodeResult;
       }
+
+      // paulmillr/qr 解码（高精度，快速）
+      if (!paulmillrDecodeQR) {
+        await loadPaulmillrDecoder();
+      }
+      const paulmillrResult = tryPaulmillrDecode(imageData, debugEnabled ? sourceName : '');
+      if (paulmillrResult) {
+        qrDebugLog(debugEnabled, sourceName, 'paulmillr/qr识别成功', {
+          preview: maskQRCodeDataForLog(paulmillrResult)
+        });
+        return paulmillrResult;
+      }
+      qrDebugLog(debugEnabled, sourceName, 'paulmillr/qr未命中，回退jsQR');
 
       qrDebugLog(debugEnabled, sourceName, 'BarcodeDetector未命中，回退jsQR');
       const jsQrResult = decodeQRCode(imageData, {

@@ -88,6 +88,9 @@ function getHTMLStart() {
   <!-- Security -->
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
 
+  <!-- QR Decoder Preload -->
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@paulmillr/qr@0.3.0/esm/decode.js" crossorigin="anonymous">
+
   <!-- Theme Initialization - Must run before CSS to prevent FOUC -->
   <script>
     (function() {
