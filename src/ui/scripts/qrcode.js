@@ -21,6 +21,7 @@ export function getQRCodeCode() {
     const DEEP_SCAN_INTERVAL = 4;
     const CENTER_CROP_RATIO = 0.72;
     const UPLOAD_DETECT_MAX_SIDE = 2200;
+    const QR_PIPELINE_VERSION = '2026-03-01-r5';
 
     // 切换连续扫描模式
     function toggleContinuousScan() {
@@ -933,6 +934,7 @@ export function getQRCodeCode() {
       const debugEnabled = options.debug !== false;
 
       qrDebugLog(debugEnabled, sourceName, '开始图片二维码解析', {
+        pipelineVersion: QR_PIPELINE_VERSION,
         size: describeImageData(imageData),
         aggressiveMode,
         hasBarcodeDetector: typeof BarcodeDetector !== 'undefined',
