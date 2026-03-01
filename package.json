@@ -9,7 +9,7 @@
     "deploy:git": "node scripts/deploy.js --git",
     "deploy:package": "node scripts/deploy.js --package",
     "deploy:dev": "node scripts/deploy.js --env development",
-    "deploy:direct": "wrangler deploy",
+    "deploy:direct": "wrangler deploy --env=\"\"",
     "dev": "wrangler dev",
     "start": "wrangler dev",
     "build": "node scripts/build-release.js",

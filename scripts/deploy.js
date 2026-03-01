@@ -30,7 +30,10 @@ const versionStrategy = args.includes('--git') ? '--git' :
 
 // 提取环境参数
 const envIndex = args.indexOf('--env');
-const envArg = envIndex !== -1 && args[envIndex + 1] ? `--env ${args[envIndex + 1]}` : '';
+const envValue = envIndex !== -1
+  ? (envIndex + 1 < args.length ? args[envIndex + 1] : '')
+  : '';
+const envArg = `--env="${envValue}"`;
 
 console.log('');
 console.log('🚀 ========================================');
@@ -122,11 +125,11 @@ try {
 
   // Step 3: 执行部署
   console.log('🚀 Step 3: 部署到 Cloudflare Workers...');
-  console.log(`   命令: npx wrangler deploy ${envArg}`.trim());
+  console.log(`   命令: npx wrangler deploy ${envArg}`);
   console.log('');
 
   try {
-    execSync(`npx wrangler deploy ${envArg}`.trim(), {
+    execSync(`npx wrangler deploy ${envArg}`, {
       stdio: 'inherit',
       encoding: 'utf-8'
     });
@@ -137,7 +140,7 @@ try {
     console.log('========================================');
     console.log('');
     console.log(`📦 版本: ${version}`);
-    console.log(`🌐 环境: ${envArg || '生产环境 (production)'}`);
+    console.log(`🌐 环境: ${envValue || '顶层环境 (top-level)'}`);
     console.log('');
 
   } catch (deployError) {
