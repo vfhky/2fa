@@ -365,6 +365,36 @@ self.addEventListener('fetch', event => {
     return;
   }
   
+  // 懒加载模块：始终从网络获取最新版本，绕过浏览器 HTTP 缓存
+  if (url.pathname.startsWith('/modules/')) {
+    event.respondWith(
+      fetch(request, { redirect: 'follow', cache: 'no-store' })
+        .then(response => {
+          if (response && response.status === 200) {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(request, responseToCache);
+            });
+          }
+          return response;
+        })
+        .catch(err => {
+          console.log('[SW] 模块网络请求失败，尝试缓存:', url.pathname, err.message);
+          return caches.match(request).then(cachedResponse => {
+            if (cachedResponse) {
+              return cachedResponse;
+            }
+            return new Response('// 模块加载失败（离线）', {
+              status: 503,
+              statusText: 'Service Unavailable',
+              headers: { 'Content-Type': 'application/javascript; charset=utf-8' }
+            });
+          });
+        })
+    );
+    return;
+  }
+
   // 主页和动态内容：网络优先，离线时使用缓存（Network First）
   // 这确保用户总是看到最新版本，只有在离线时才使用缓存
   if (url.pathname === '/' || url.pathname === '') {
