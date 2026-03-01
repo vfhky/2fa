@@ -757,6 +757,8 @@ export function getQRCodeCode() {
       targetCanvas.width = targetWidth;
       targetCanvas.height = targetHeight;
       const targetCtx = targetCanvas.getContext('2d');
+      // 二维码场景优先保持模块边缘，避免插值模糊导致识别失败
+      targetCtx.imageSmoothingEnabled = false;
       targetCtx.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight);
 
       return targetCtx.getImageData(0, 0, targetWidth, targetHeight);
@@ -1005,6 +1007,17 @@ export function getQRCodeCode() {
         if (!options.deep) {
           qrDebugLog(!!debugTag, debugTag, '深度解析未启用，结束');
           return null;
+        }
+
+        // 上传图片等 aggressive 场景：先尝试原图增强，避免缩放插值带来的信息损失
+        if (options.aggressive) {
+          const fullContrast = enhanceImageData(imageData, 'contrast');
+          result = runJsQRAttempts(fullContrast, deepOptions, debugTag, 'deep/aggressive-full-contrast');
+          if (result) return result;
+
+          const fullBinaryAdaptive = enhanceImageData(imageData, 'binaryAdaptive');
+          result = runJsQRAttempts(fullBinaryAdaptive, deepOptions, debugTag, 'deep/aggressive-full-binaryAdaptive');
+          if (result) return result;
         }
 
         const optimizedImageData = downscaleImageData(imageData, 960);
