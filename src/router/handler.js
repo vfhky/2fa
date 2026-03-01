@@ -170,11 +170,22 @@ export async function handleRequest(request, env) {
 			// 🔄 自动续期：如果 Token 进入续期阈值，在响应头中添加标记
 			if (request.authDetails && request.authDetails.needsRefresh) {
 				const newResponse = new Response(response.body, response);
+				const remainingMinutes = Number.isFinite(request.authDetails.remainingMinutes)
+					? request.authDetails.remainingMinutes.toFixed(2)
+					: null;
+				const remainingDays = Number.isFinite(request.authDetails.remainingDays) ? request.authDetails.remainingDays.toFixed(2) : null;
+
 				newResponse.headers.set('X-Token-Refresh-Needed', 'true');
-				newResponse.headers.set('X-Token-Remaining-Days', request.authDetails.remainingDays.toFixed(2));
+				if (remainingMinutes !== null) {
+					newResponse.headers.set('X-Token-Remaining-Minutes', remainingMinutes);
+				}
+				// 向后兼容：保留旧字段，后续版本可移除
+				if (remainingDays !== null) {
+					newResponse.headers.set('X-Token-Remaining-Days', remainingDays);
+				}
 
 				logger.info('Token 即将过期，建议客户端刷新', {
-					remainingDays: request.authDetails.remainingDays.toFixed(2),
+					remainingMinutes,
 				});
 
 				return newResponse;

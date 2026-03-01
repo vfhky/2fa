@@ -98,7 +98,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 - **数据加密**：配置 `ENCRYPTION_KEY` 后所有密钥和备份使用 AES-GCM 256 位加密
 - **传输**：全程 HTTPS，TLS 1.2+
 - **隐私**：OTP 在客户端生成，不收集使用数据，完全开源
-- **登录有效期**：30 天，活跃使用自动续期（剩余 < 7 天时自动延长 30 天）
+- **登录有效期**：支持分钟级配置（默认环境为 30 分钟，剩余 < 10 分钟时自动续期）
 
 ## 🔗 公开 OTP API
 

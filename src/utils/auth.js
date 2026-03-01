@@ -19,15 +19,15 @@ import {
 } from './errors.js';
 
 // JWT 配置
-const DEFAULT_AUTH_SESSION_TTL_DAYS = 30; // 单个 JWT 默认有效期
-const DEFAULT_AUTH_AUTO_REFRESH_THRESHOLD_DAYS = 7; // 剩余时间少于该值时触发自动续期
-const DEFAULT_AUTH_ABSOLUTE_TTL_DAYS = 30; // 从首次登录起的绝对会话上限
+const DEFAULT_AUTH_SESSION_TTL_MINUTES = 30 * 24 * 60; // 单个 JWT 默认有效期（30 天）
+const DEFAULT_AUTH_AUTO_REFRESH_THRESHOLD_MINUTES = 7 * 24 * 60; // 剩余时间少于该值时触发自动续期（7 天）
+const DEFAULT_AUTH_ABSOLUTE_TTL_MINUTES = 30 * 24 * 60; // 从首次登录起的绝对会话上限（30 天）
 const DEFAULT_AUTH_IDLE_TIMEOUT_MINUTES = 120; // 空闲超时（分钟）
 const JWT_ALGORITHM = 'HS256';
 
 // Cookie 配置
 const COOKIE_NAME = 'auth_token';
-const COOKIE_MAX_AGE = DEFAULT_AUTH_SESSION_TTL_DAYS * 24 * 60 * 60; // 30天（秒）
+const COOKIE_MAX_AGE = DEFAULT_AUTH_SESSION_TTL_MINUTES * 60; // 30天（秒）
 
 // KV 存储键
 const KV_USER_PASSWORD_KEY = 'user_password';
@@ -37,18 +37,6 @@ const KV_AUTH_SESSION_VERSION_KEY = 'auth_session_version';
 // 密码配置
 const PASSWORD_MIN_LENGTH = 8;
 const PBKDF2_ITERATIONS = 100000; // PBKDF2 迭代次数
-
-function parsePositiveIntEnv(value, fallback) {
-	if (value === undefined || value === null || value === '') {
-		return fallback;
-	}
-
-	const parsed = Number.parseInt(String(value), 10);
-	if (!Number.isFinite(parsed) || parsed <= 0) {
-		return fallback;
-	}
-	return parsed;
-}
 
 function parseNonNegativeIntEnv(value, fallback) {
 	if (value === undefined || value === null || value === '') {
@@ -62,23 +50,74 @@ function parseNonNegativeIntEnv(value, fallback) {
 	return parsed;
 }
 
-function toSecondsFromDays(days) {
-	return days * 24 * 60 * 60;
+function parseOptionalIntEnv(value, allowZero = false) {
+	if (value === undefined || value === null || value === '') {
+		return null;
+	}
+
+	const parsed = Number.parseInt(String(value), 10);
+	if (!Number.isFinite(parsed)) {
+		return null;
+	}
+	if (allowZero ? parsed < 0 : parsed <= 0) {
+		return null;
+	}
+	return parsed;
+}
+
+function resolveDurationMinutes(env, minutesKey, legacyDaysKey, fallbackMinutes, allowZero = false) {
+	const minuteValue = parseOptionalIntEnv(env[minutesKey], allowZero);
+	if (minuteValue !== null) {
+		return minuteValue;
+	}
+
+	const legacyDaysValue = parseOptionalIntEnv(env[legacyDaysKey], allowZero);
+	if (legacyDaysValue !== null) {
+		return legacyDaysValue * 24 * 60;
+	}
+
+	return fallbackMinutes;
+}
+
+function toSecondsFromMinutes(minutes) {
+	return minutes * 60;
+}
+
+function formatDurationMinutes(minutes) {
+	return `${minutes}分钟`;
 }
 
 function getAuthSessionPolicy(env = {}) {
-	const sessionTtlDays = parsePositiveIntEnv(env.AUTH_SESSION_TTL_DAYS, DEFAULT_AUTH_SESSION_TTL_DAYS);
-	const autoRefreshThresholdDays = parseNonNegativeIntEnv(env.AUTH_AUTO_REFRESH_THRESHOLD_DAYS, DEFAULT_AUTH_AUTO_REFRESH_THRESHOLD_DAYS);
-	const absoluteTtlDays = parsePositiveIntEnv(env.AUTH_ABSOLUTE_TTL_DAYS, DEFAULT_AUTH_ABSOLUTE_TTL_DAYS);
+	const sessionTtlMinutes = resolveDurationMinutes(
+		env,
+		'AUTH_SESSION_TTL_MINUTES',
+		'AUTH_SESSION_TTL_DAYS',
+		DEFAULT_AUTH_SESSION_TTL_MINUTES,
+		false,
+	);
+	const autoRefreshThresholdMinutes = resolveDurationMinutes(
+		env,
+		'AUTH_AUTO_REFRESH_THRESHOLD_MINUTES',
+		'AUTH_AUTO_REFRESH_THRESHOLD_DAYS',
+		DEFAULT_AUTH_AUTO_REFRESH_THRESHOLD_MINUTES,
+		true,
+	);
+	const absoluteTtlMinutes = resolveDurationMinutes(
+		env,
+		'AUTH_ABSOLUTE_TTL_MINUTES',
+		'AUTH_ABSOLUTE_TTL_DAYS',
+		DEFAULT_AUTH_ABSOLUTE_TTL_MINUTES,
+		false,
+	);
 	const idleTimeoutMinutes = parseNonNegativeIntEnv(env.AUTH_IDLE_TIMEOUT_MINUTES, DEFAULT_AUTH_IDLE_TIMEOUT_MINUTES);
 
 	return {
-		sessionTtlDays,
-		autoRefreshThresholdDays,
-		absoluteTtlDays,
+		sessionTtlMinutes,
+		autoRefreshThresholdMinutes,
+		absoluteTtlMinutes,
 		idleTimeoutMinutes,
-		sessionTtlSeconds: toSecondsFromDays(sessionTtlDays),
-		absoluteTtlSeconds: toSecondsFromDays(absoluteTtlDays),
+		sessionTtlSeconds: toSecondsFromMinutes(sessionTtlMinutes),
+		absoluteTtlSeconds: toSecondsFromMinutes(absoluteTtlMinutes),
 		idleTimeoutSeconds: idleTimeoutMinutes * 60,
 	};
 }
@@ -331,10 +370,10 @@ async function verifyPassword(password, storedHash, env = null) {
  * 生成 JWT Token
  * @param {Object} payload - 要编码的数据
  * @param {string} secret - 签名密钥
- * @param {number} expiryDays - 过期天数
+ * @param {number} expiryMinutes - 过期分钟数
  * @returns {Promise<string>} JWT token
  */
-async function generateJWT(payload, secret, expiryDays = DEFAULT_AUTH_SESSION_TTL_DAYS) {
+async function generateJWT(payload, secret, expiryMinutes = DEFAULT_AUTH_SESSION_TTL_MINUTES) {
 	const header = {
 		alg: JWT_ALGORITHM,
 		typ: 'JWT',
@@ -344,7 +383,7 @@ async function generateJWT(payload, secret, expiryDays = DEFAULT_AUTH_SESSION_TT
 	const jwtPayload = {
 		...payload,
 		iat: now, // 签发时间
-		exp: now + expiryDays * 24 * 60 * 60, // 过期时间
+		exp: now + expiryMinutes * 60, // 过期时间
 	};
 
 	// Base64URL 编码
@@ -540,7 +579,7 @@ export async function verifyAuth(request, env) {
 				if (!policyCheck.valid) {
 					logger.info('JWT 会话策略校验失败', {
 						reason: policyCheck.reason,
-						absoluteTtlDays: sessionPolicy.absoluteTtlDays,
+						absoluteTtlMinutes: sessionPolicy.absoluteTtlMinutes,
 						idleTimeoutMinutes: sessionPolicy.idleTimeoutMinutes,
 					});
 					return false;
@@ -565,7 +604,7 @@ export async function verifyAuth(request, env) {
  * 验证认证并返回详细信息（用于自动续期）
  * @param {Request} request - HTTP 请求对象
  * @param {Object} env - 环境变量对象
- * @returns {Promise<Object|null>} 认证信息对象 { valid: boolean, payload: Object, remainingDays: number, needsRefresh: boolean } 或 null
+ * @returns {Promise<Object|null>} 认证信息对象 { valid: boolean, payload: Object, remainingMinutes: number, needsRefresh: boolean } 或 null
  */
 export async function verifyAuthWithDetails(request, env) {
 	const logger = getLogger(env);
@@ -614,7 +653,7 @@ export async function verifyAuthWithDetails(request, env) {
 			if (!policyCheck.valid) {
 				logger.info('JWT 会话策略校验失败（详细）', {
 					reason: policyCheck.reason,
-					absoluteTtlDays: sessionPolicy.absoluteTtlDays,
+					absoluteTtlMinutes: sessionPolicy.absoluteTtlMinutes,
 					idleTimeoutMinutes: sessionPolicy.idleTimeoutMinutes,
 				});
 				return null;
@@ -622,18 +661,20 @@ export async function verifyAuthWithDetails(request, env) {
 
 			const now = Math.floor(Date.now() / 1000);
 			const remainingSeconds = payload.exp - now;
-			const remainingDays = remainingSeconds / (24 * 60 * 60);
-			const needsRefresh = remainingDays < sessionPolicy.autoRefreshThresholdDays;
+			const remainingMinutes = remainingSeconds / 60;
+			const remainingDays = remainingSeconds / (24 * 60 * 60); // 兼容旧字段
+			const needsRefresh = remainingMinutes < sessionPolicy.autoRefreshThresholdMinutes;
 
 			logger.debug('JWT 验证成功（详细）', {
 				exp: new Date(payload.exp * 1000).toISOString(),
-				remainingDays: remainingDays.toFixed(2),
+				remainingMinutes: remainingMinutes.toFixed(2),
 				needsRefresh,
 			});
 
 			return {
 				valid: true,
 				payload,
+				remainingMinutes,
 				remainingDays,
 				needsRefresh,
 				token,
@@ -754,7 +795,7 @@ export async function handleFirstTimeSetup(request, env) {
 				now,
 			),
 			passwordHash,
-			sessionPolicy.sessionTtlDays,
+			sessionPolicy.sessionTtlMinutes,
 		);
 
 		const expiryDate = new Date(now * 1000 + sessionPolicy.sessionTtlSeconds * 1000);
@@ -767,7 +808,7 @@ export async function handleFirstTimeSetup(request, env) {
 				success: true,
 				message: '密码设置成功，已自动登录',
 				expiresAt: expiryDate.toISOString(),
-				expiresIn: `${sessionPolicy.sessionTtlDays}天`,
+				expiresIn: formatDurationMinutes(sessionPolicy.sessionTtlMinutes),
 			}),
 			{
 				status: 200,
@@ -872,7 +913,7 @@ export async function handleLogin(request, env) {
 				now,
 			),
 			storedPasswordHash,
-			sessionPolicy.sessionTtlDays,
+			sessionPolicy.sessionTtlMinutes,
 		);
 
 		const expiryDate = new Date(now * 1000 + sessionPolicy.sessionTtlSeconds * 1000);
@@ -883,7 +924,7 @@ export async function handleLogin(request, env) {
 				success: true,
 				message: '登录成功',
 				expiresAt: expiryDate.toISOString(),
-				expiresIn: `${sessionPolicy.sessionTtlDays}天`,
+				expiresIn: formatDurationMinutes(sessionPolicy.sessionTtlMinutes),
 			}),
 			{
 				status: 200,
@@ -1013,7 +1054,7 @@ export async function handleRefreshToken(request, env) {
 				payload,
 			),
 			storedPasswordHash,
-			sessionPolicy.sessionTtlDays,
+			sessionPolicy.sessionTtlMinutes,
 		);
 
 		const expiryDate = new Date(now * 1000 + sessionPolicy.sessionTtlSeconds * 1000);
@@ -1027,7 +1068,7 @@ export async function handleRefreshToken(request, env) {
 				success: true,
 				message: '令牌刷新成功',
 				expiresAt: expiryDate.toISOString(),
-				expiresIn: `${sessionPolicy.sessionTtlDays}天`,
+				expiresIn: formatDurationMinutes(sessionPolicy.sessionTtlMinutes),
 			}),
 			{
 				status: 200,

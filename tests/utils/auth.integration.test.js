@@ -562,33 +562,64 @@ describe('Auth.js Integration Tests', () => {
       expect(data.message).toContain('认证');
     });
 
-    it('应该刷新后的 token 包含新的过期时间', async () => {
-      const request = createMockRequest({
-        method: 'POST',
-        pathname: '/api/refresh-token',
-        cookies: { auth_token: validToken }
-      });
+    it('应该支持分钟级会话有效期配置', async () => {
+      vi.useFakeTimers();
+      try {
+        const baseTime = new Date('2026-01-01T00:00:00.000Z');
+        vi.setSystemTime(baseTime);
 
-      const response = await handleRefreshToken(request, env);
-      const data = await getResponseJson(response);
-      expect(data.success).toBe(true);
-      const newToken = extractCookie(response, 'auth_token');
-      expect(newToken).toBeDefined();
+        const localKv = new MockKV();
+        const localEnv = createMockEnv(localKv, {
+          AUTH_SESSION_TTL_MINUTES: '45',
+          AUTH_AUTO_REFRESH_THRESHOLD_MINUTES: '5',
+          AUTH_ABSOLUTE_TTL_MINUTES: '180',
+          AUTH_IDLE_TIMEOUT_MINUTES: '120'
+        });
 
-      // 解析新 token 的过期时间
-      const parts = newToken.split('.');
-      const payload = JSON.parse(atob(parts[1]));
+        const setupRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/setup',
+          body: { password: testPassword, confirmPassword: testPassword }
+        });
+        await handleFirstTimeSetup(setupRequest, localEnv);
 
-      // 验证新的过期时间应该在未来
-      const expiryTime = payload.exp * 1000; // 转为毫秒
-      const now = Date.now();
-      expect(expiryTime).toBeGreaterThan(now);
+        const loginRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/login',
+          body: { credential: testPassword }
+        });
+        const loginResponse = await handleLogin(loginRequest, localEnv);
+        const localToken = extractCookie(loginResponse, 'auth_token');
+        expect(localToken).toBeDefined();
 
-      // 验证过期时间约为30天后
-      const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-      const timeDiff = expiryTime - now;
-      expect(timeDiff).toBeGreaterThan(thirtyDaysMs * 0.9); // 至少27天
-      expect(timeDiff).toBeLessThan(thirtyDaysMs * 1.1); // 最多33天
+        const refreshRequest = createMockRequest({
+          method: 'POST',
+          pathname: '/api/refresh-token',
+          cookies: { auth_token: localToken }
+        });
+        const refreshResponse = await handleRefreshToken(refreshRequest, localEnv);
+        const data = await getResponseJson(refreshResponse);
+        expect(data.success).toBe(true);
+        expect(data.expiresIn).toBe('45分钟');
+
+        const newToken = extractCookie(refreshResponse, 'auth_token');
+        expect(newToken).toBeDefined();
+
+        // 解析新 token 的过期时间
+        const parts = newToken.split('.');
+        const payload = JSON.parse(atob(parts[1]));
+        const expiryTime = payload.exp * 1000;
+        const now = Date.now();
+        expect(expiryTime).toBeGreaterThan(now);
+
+        // 验证过期时间约为 45 分钟后（允许 10% 误差）
+        const fortyFiveMinutesMs = 45 * 60 * 1000;
+        const timeDiff = expiryTime - now;
+        expect(timeDiff).toBeGreaterThan(fortyFiveMinutesMs * 0.9);
+        expect(timeDiff).toBeLessThan(fortyFiveMinutesMs * 1.1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('应该对 refresh 接口应用独立限流', async () => {
@@ -676,8 +707,8 @@ describe('Auth.js Integration Tests', () => {
 
         const localKv = new MockKV();
         const localEnv = createMockEnv(localKv, {
-          AUTH_ABSOLUTE_TTL_DAYS: '1',
-          AUTH_SESSION_TTL_DAYS: '30',
+          AUTH_ABSOLUTE_TTL_MINUTES: '1',
+          AUTH_SESSION_TTL_MINUTES: '10',
           AUTH_IDLE_TIMEOUT_MINUTES: '120'
         });
 
@@ -697,7 +728,7 @@ describe('Auth.js Integration Tests', () => {
         const token = extractCookie(loginResponse, 'auth_token');
         expect(token).toBeDefined();
 
-        vi.setSystemTime(new Date(baseTime.getTime() + 2 * 24 * 60 * 60 * 1000));
+        vi.setSystemTime(new Date(baseTime.getTime() + 2 * 60 * 1000));
 
         const refreshRequest = createMockRequest({
           method: 'POST',
@@ -720,8 +751,8 @@ describe('Auth.js Integration Tests', () => {
         const localKv = new MockKV();
         const localEnv = createMockEnv(localKv, {
           AUTH_IDLE_TIMEOUT_MINUTES: '1',
-          AUTH_ABSOLUTE_TTL_DAYS: '30',
-          AUTH_SESSION_TTL_DAYS: '30'
+          AUTH_ABSOLUTE_TTL_MINUTES: '1440',
+          AUTH_SESSION_TTL_MINUTES: '120'
         });
 
         const setupRequest = createMockRequest({

@@ -236,8 +236,19 @@ export function getAuthCode() {
       
       // 🔄 自动续期：检查响应头中是否有刷新标记
       if (response.headers.get('X-Token-Refresh-Needed') === 'true') {
-        const remainingDays = response.headers.get('X-Token-Remaining-Days');
-        console.log('⏰ Token 即将过期（剩余 ' + remainingDays + ' 天），正在自动刷新...');
+        let remainingMinutes = response.headers.get('X-Token-Remaining-Minutes');
+        if (!remainingMinutes) {
+          const remainingDays = response.headers.get('X-Token-Remaining-Days');
+          if (remainingDays) {
+            const parsedDays = Number.parseFloat(remainingDays);
+            if (Number.isFinite(parsedDays)) {
+              remainingMinutes = (parsedDays * 24 * 60).toFixed(2);
+            }
+          }
+        }
+
+        const displayRemaining = remainingMinutes || '未知';
+        console.log('⏰ Token 即将过期（剩余 ' + displayRemaining + ' 分钟），正在自动刷新...');
         
         // 异步刷新 Token（不阻塞当前请求）
         refreshAuthToken().then(success => {
