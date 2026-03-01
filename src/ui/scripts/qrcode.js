@@ -15,6 +15,7 @@ export function getQRCodeCode() {
     let continuousScanCount = 0;
     let scanFrameCounter = 0;
     let lastScanAttemptAt = 0;
+    const decodeAttemptWarningCache = new Set();
     const SCAN_MIN_INTERVAL_MS = 80;
     const DEEP_SCAN_INTERVAL = 4;
     const CENTER_CROP_RATIO = 0.72;
@@ -529,7 +530,12 @@ export function getQRCodeCode() {
             return result.data;
           }
         } catch (error) {
-          console.warn('二维码解析选项失败:', option, error.message);
+          const reason = error && error.message ? error.message : 'unknown';
+          const key = (option.inversionAttempts || 'unknown') + '|' + reason;
+          if (!decodeAttemptWarningCache.has(key)) {
+            decodeAttemptWarningCache.add(key);
+            console.warn('二维码解析选项失败:', option, reason);
+          }
         }
       }
       return null;
@@ -730,8 +736,7 @@ export function getQRCodeCode() {
         ];
         const deepOptions = [
           { inversionAttempts: 'attemptBoth' },
-          { inversionAttempts: 'invertFirst' },
-          { inversionAttempts: 'onlyInvert' }
+          { inversionAttempts: 'invertFirst' }
         ];
 
         // 快速路径：先全图，再中心区域

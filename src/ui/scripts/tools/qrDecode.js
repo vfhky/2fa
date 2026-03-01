@@ -14,6 +14,7 @@ export function getQRDecodeToolCode() {
     let isDecodeScanning = false;
     let decodeFrameCounter = 0;
     let lastDecodeAttemptAt = 0;
+    const decodeToolWarningCache = new Set();
     let decodeCanvas = null;
     let decodeContext = null;
     const DECODE_MIN_INTERVAL_MS = 80;
@@ -256,8 +257,7 @@ export function getQRDecodeToolCode() {
         ? [
             { inversionAttempts: 'invertFirst' },
             { inversionAttempts: 'dontInvert' },
-            { inversionAttempts: 'attemptBoth' },
-            { inversionAttempts: 'onlyInvert' }
+            { inversionAttempts: 'attemptBoth' }
           ]
         : [
             { inversionAttempts: 'invertFirst' },
@@ -272,7 +272,12 @@ export function getQRDecodeToolCode() {
             return result.data;
           }
         } catch (error) {
-          console.warn('工具二维码解析选项失败:', parseOptions[i], error.message);
+          const reason = error && error.message ? error.message : 'unknown';
+          const key = (parseOptions[i].inversionAttempts || 'unknown') + '|' + reason;
+          if (!decodeToolWarningCache.has(key)) {
+            decodeToolWarningCache.add(key);
+            console.warn('工具二维码解析选项失败:', parseOptions[i], reason);
+          }
         }
       }
 
