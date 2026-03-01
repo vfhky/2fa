@@ -20,6 +20,13 @@ export function getQRDecodeToolCode() {
     const DECODE_MIN_INTERVAL_MS = 80;
     const DEEP_DECODE_INTERVAL = 4;
 
+    // 确保二维码主模块已加载（摄像头、解码管线等共享函数均在其中）
+    async function ensureQRCodeModule() {
+      if (typeof loadModule === 'function') {
+        await loadModule('qrcode');
+      }
+    }
+
     function showQRDecodeModal() {
       showModal('qrDecodeModal', () => {
         document.getElementById('decodeScannerContainer').style.display = 'none';
@@ -54,91 +61,16 @@ export function getQRDecodeToolCode() {
       const errorMessage = document.getElementById('decodeErrorMessage');
 
       try {
+        // 加载二维码主模块，获取共享的摄像头和解码函数
+        await ensureQRCodeModule();
+
         // 停止之前的流（如果存在）
         if (decodeStream) {
           decodeStream.getTracks().forEach(track => track.stop());
           decodeStream = null;
         }
 
-        if (typeof openCameraStream === 'function') {
-          decodeStream = await openCameraStream(video);
-        } else {
-          // 回退：当主模块不可用时使用内联摄像头逻辑
-          if (!navigator.mediaDevices) {
-            if (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia) {
-              navigator.mediaDevices = {};
-              navigator.mediaDevices.getUserMedia = function(constraints) {
-                const getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
-                if (!getUserMedia) {
-                  return Promise.reject(new Error('getUserMedia is not implemented in this browser'));
-                }
-                return new Promise((resolve, reject) => {
-                  getUserMedia.call(navigator, constraints, resolve, reject);
-                });
-              };
-            } else {
-              throw new Error('您的浏览器不支持摄像头功能，请使用现代浏览器');
-            }
-          }
-
-          if (!navigator.mediaDevices.getUserMedia) {
-            throw new Error('您的浏览器不支持摄像头功能，请使用现代浏览器');
-          }
-
-          const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-          const isIPad = /iPad/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-          let configs;
-          if (isIPad || isIOS) {
-            configs = [
-              { video: { facingMode: 'environment', width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 } } },
-              { video: { facingMode: 'user', width: { ideal: 480, max: 640 }, height: { ideal: 360, max: 480 } } },
-              { video: { width: { ideal: 640 }, height: { ideal: 480 } } },
-              { video: true }
-            ];
-          } else {
-            configs = [
-              { video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } } },
-              { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } },
-              { video: true }
-            ];
-          }
-
-          let stream = null;
-          for (let i = 0; i < configs.length; i++) {
-            try {
-              stream = await navigator.mediaDevices.getUserMedia(configs[i]);
-              break;
-            } catch (e) {
-              if (i === configs.length - 1) {
-                throw e;
-              }
-            }
-          }
-
-          if (!stream) {
-            throw new Error('无法获取摄像头访问权限');
-          }
-
-          decodeStream = stream;
-          video.srcObject = decodeStream;
-
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              reject(new Error('摄像头加载超时'));
-            }, 10000);
-
-            video.onloadedmetadata = () => {
-              clearTimeout(timeout);
-              video.play().then(resolve).catch(reject);
-            };
-
-            video.onerror = () => {
-              clearTimeout(timeout);
-              reject(new Error('摄像头播放失败'));
-            };
-          });
-        }
+        decodeStream = await openCameraStream(video);
 
         status.textContent = '';
         status.style.display = 'none';
@@ -150,7 +82,7 @@ export function getQRDecodeToolCode() {
           decodeContext = decodeCanvas.getContext('2d', { willReadFrequently: true });
         }
 
-        if (!decodeBarcodeDetector && typeof createBarcodeDetectorInstance === 'function') {
+        if (!decodeBarcodeDetector) {
           decodeBarcodeDetector = createBarcodeDetectorInstance();
         }
 
@@ -161,10 +93,7 @@ export function getQRDecodeToolCode() {
         }, 500);
 
       } catch (err) {
-        const errorMsg = typeof getCameraErrorMessage === 'function'
-          ? getCameraErrorMessage(err)
-          : '摄像头启动失败: ' + err.message;
-        errorMessage.textContent = errorMsg;
+        errorMessage.textContent = getCameraErrorMessage(err);
         error.style.display = 'block';
         status.style.display = 'none';
       }
@@ -186,36 +115,6 @@ export function getQRDecodeToolCode() {
       startDecodeCamera();
     }
 
-    function decodeQRCodeForTool(imageData, deepMode, aggressiveMode = false) {
-      if (typeof decodeQRCode === 'function') {
-        return decodeQRCode(imageData, { deep: deepMode, aggressive: aggressiveMode });
-      }
-
-      // 回退：当主模块不可用时使用 jsQR 直接解码
-      if (typeof jsQR === 'undefined') {
-        return null;
-      }
-
-      const parseOptions = [
-        { inversionAttempts: 'invertFirst' },
-        { inversionAttempts: 'dontInvert' },
-        { inversionAttempts: 'attemptBoth' }
-      ];
-
-      for (let i = 0; i < parseOptions.length; i++) {
-        try {
-          const result = jsQR(imageData.data, imageData.width, imageData.height, parseOptions[i]);
-          if (result && result.data) {
-            return result.data;
-          }
-        } catch (error) {
-          // ignore individual parse option failures
-        }
-      }
-
-      return null;
-    }
-
     function scanForDecodeQRCode() {
       if (!isDecodeScanning) return;
       const now = Date.now();
@@ -226,7 +125,6 @@ export function getQRDecodeToolCode() {
       lastDecodeAttemptAt = now;
 
       const video = document.getElementById('decodeScannerVideo');
-      const status = document.getElementById('decodeScannerStatus');
 
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         try {
@@ -242,7 +140,7 @@ export function getQRDecodeToolCode() {
             const deepMode = decodeFrameCounter % DEEP_DECODE_INTERVAL === 0;
 
             // 优先使用 BarcodeDetector（异步，更准确）
-            if (decodeBarcodeDetector && !decodeBarcodeDetectorPending && typeof createCanvasFromImageData === 'function' && typeof pickBarcodeDetectorValue === 'function') {
+            if (decodeBarcodeDetector && !decodeBarcodeDetectorPending) {
               decodeBarcodeDetectorPending = true;
               const candidateCanvas = createCanvasFromImageData(imageData);
               decodeBarcodeDetector.detect(candidateCanvas).then(function(detections) {
@@ -260,7 +158,7 @@ export function getQRDecodeToolCode() {
             }
 
             // paulmillr/qr 同步解码（快速、高精度）
-            if (typeof paulmillrDecodeQR !== 'undefined' && paulmillrDecodeQR && typeof tryPaulmillrDecode === 'function') {
+            if (paulmillrDecodeQR) {
               const pmResult = tryPaulmillrDecode(imageData, '');
               if (pmResult) {
                 console.log('工具paulmillr/qr扫描成功');
@@ -270,13 +168,10 @@ export function getQRDecodeToolCode() {
             }
 
             // jsQR 同步解码
-            const qrCode = decodeQRCodeForTool(imageData, deepMode, false);
+            const qrCode = decodeQRCode(imageData, { deep: deepMode });
 
             if (qrCode) {
-              const preview = typeof maskQRCodeDataForLog === 'function'
-                ? maskQRCodeDataForLog(qrCode)
-                : (typeof qrCode === 'string' ? (qrCode.length > 96 ? qrCode.slice(0, 96) + '...(' + qrCode.length + ' chars)' : qrCode) : '');
-              console.log('二维码解析成功:', preview);
+              console.log('二维码解析成功:', maskQRCodeDataForLog(qrCode));
               processDecodeResult(qrCode);
               return;
             }
@@ -327,13 +222,16 @@ export function getQRDecodeToolCode() {
           const img = new Image();
           img.onload = async function() {
             try {
+              // 加载二维码主模块，复用与"导入数据"完全相同的解码管线
+              await ensureQRCodeModule();
+
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
 
-              // 限制最大尺寸以提高性能和识别率（与主模块一致）
+              // 限制最大尺寸（与主模块 handleImageUpload 一致）
               let width = img.width;
               let height = img.height;
-              const maxSize = 2200;
+              const maxSize = typeof UPLOAD_DETECT_MAX_SIDE !== 'undefined' ? UPLOAD_DETECT_MAX_SIDE : 2200;
 
               if (width > maxSize || height > maxSize) {
                 const ratio = Math.min(maxSize / width, maxSize / height);
@@ -348,51 +246,11 @@ export function getQRDecodeToolCode() {
 
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-              // 复用主模块的完整解码管线（BarcodeDetector → paulmillr/qr → jsQR 增强）
-              let qrCode = null;
-              if (typeof decodeUploadedQRCodeWithBitmapFallback === 'function') {
-                qrCode = await decodeUploadedQRCodeWithBitmapFallback(file, imageData, {
-                  aggressive: true,
-                  sourceName: '工具二维码图片上传'
-                });
-              } else if (typeof decodeUploadedQRCode === 'function') {
-                qrCode = await decodeUploadedQRCode(imageData, {
-                  aggressive: true,
-                  sourceName: '工具二维码图片上传'
-                });
-              } else {
-                // 主模块不可用时的独立解码路径
-                // 1. BarcodeDetector
-                if (!qrCode && typeof BarcodeDetector !== 'undefined') {
-                  try {
-                    const detector = typeof createBarcodeDetectorInstance === 'function'
-                      ? createBarcodeDetectorInstance()
-                      : new BarcodeDetector({ formats: ['qr_code'] });
-                    if (detector) {
-                      const detections = await detector.detect(canvas);
-                      const value = typeof pickBarcodeDetectorValue === 'function'
-                        ? pickBarcodeDetectorValue(detections)
-                        : (Array.isArray(detections) && detections.length > 0 && detections[0].rawValue ? detections[0].rawValue.trim() : null);
-                      if (value) qrCode = value;
-                    }
-                  } catch (e) { /* ignore */ }
-                }
-
-                // 2. paulmillr/qr
-                if (!qrCode && typeof paulmillrDecodeQR !== 'undefined' && paulmillrDecodeQR) {
-                  try {
-                    const pmResult = typeof tryPaulmillrDecode === 'function'
-                      ? tryPaulmillrDecode(imageData, '')
-                      : paulmillrDecodeQR({ width: imageData.width, height: imageData.height, data: imageData.data });
-                    if (pmResult) qrCode = pmResult;
-                  } catch (e) { /* ignore */ }
-                }
-
-                // 3. jsQR
-                if (!qrCode) {
-                  qrCode = decodeQRCodeForTool(imageData, true, true);
-                }
-              }
+              // 直接调用主模块的完整解码管线（与二维码导入完全一致）
+              const qrCode = await decodeUploadedQRCodeWithBitmapFallback(file, imageData, {
+                aggressive: true,
+                sourceName: '工具二维码图片上传'
+              });
 
               if (qrCode) {
                 processDecodeResult(qrCode);
