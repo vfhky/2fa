@@ -1617,6 +1617,12 @@ export function getCoreCode() {
       hideToolsModal();
       showKeyGeneratorModal();
     }
+
+    // 密钥验证码
+    function showSecretOtpTool() {
+      hideToolsModal();
+      showSecretOtpModal();
+    }
     
     async function handleSubmit(event) {
       event.preventDefault();

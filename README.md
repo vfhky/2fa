@@ -10,13 +10,17 @@
 
 ## 📸 截图预览
 
-|                     桌面端                      |                    手机端                    |
-| :---------------------------------------------: | :------------------------------------------: |
-| ![桌面端](docs/images/screenshot-desktop-1.png) | ![手机端](docs/images/screenshot-mobile.png) |
+|                                             桌面端                                             |
+| :--------------------------------------------------------------------------------------------: |
+| ![桌面端](docs/images/screenshot-desktop-1.png)![桌面端](docs/images/screenshot-desktop-2.png) |
+
+|                    移动端                    |
+| :------------------------------------------: |
+| ![移动端](docs/images/screenshot-mobile.png) |
 
 ## 🚀 魔改的地方
 
-项目clone自 [wuzf/2fa](https://github.com/wuzf/2fa) ，并做了如下魔改的地方
+项目clone自 [wuzf/2fa](https://github.com/wuzf/2fa) ，在此致敬，然后做了如下魔改的地方
 
 1. 支持分组展示，例如在RackNerd或者Google都有多个账号，那么所有的的账号都归类到RackNerd或者Google组下面
 2. 优化了二维码扫码相关模块，提升二维码图片的识别率，避免从Google Authenticator等导出的二维码图片无法识别的问题

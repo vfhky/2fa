@@ -11,6 +11,7 @@ import { getBase32ToolCode } from './tools/base32Tool.js';
 import { getTimestampToolCode } from './tools/timestampTool.js';
 import { getKeyCheckerToolCode } from './tools/keyChecker.js';
 import { getKeyGeneratorToolCode } from './tools/keyGenerator.js';
+import { getSecretOtpToolCode } from './tools/secretOtpTool.js';
 
 /**
  * Get complete Tools code by integrating all tool modules
@@ -18,7 +19,7 @@ import { getKeyGeneratorToolCode } from './tools/keyGenerator.js';
  */
 export function getToolsCode() {
 	return `    // ========== 实用工具模块集合 ==========
-    // 包含6个独立工具：二维码解析、二维码生成、Base32编解码、时间戳、密钥检查器、密钥生成器
+    // 包含7个独立工具：二维码解析、二维码生成、Base32编解码、时间戳、密钥检查器、密钥生成器、密钥验证码
 
     // 入口函数
     function showQRScanAndDecode() {
@@ -51,6 +52,11 @@ export function getToolsCode() {
       showKeyGeneratorModal();
     }
 
+    function showSecretOtpTool() {
+      hideToolsModal();
+      showSecretOtpModal();
+    }
+
 ${getQRDecodeToolCode()}
 
 ${getQRGenerateToolCode()}
@@ -62,5 +68,7 @@ ${getTimestampToolCode()}
 ${getKeyCheckerToolCode()}
 
 ${getKeyGeneratorToolCode()}
+
+${getSecretOtpToolCode()}
 `;
 }

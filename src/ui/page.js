@@ -530,6 +530,14 @@ function getHTMLBody() {
             <div class="tool-desc">生成随机TOTP密钥</div>
           </div>
         </div>
+
+        <div class="tool-item" onclick="showSecretOtpTool()">
+          <div class="tool-icon">🔢</div>
+          <div class="tool-content">
+            <div class="tool-title">密钥验证码</div>
+            <div class="tool-desc">输入密钥快速生成验证码</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -787,6 +795,74 @@ function getHTMLBody() {
     </div>
   </div>
   
+  <!-- 密钥验证码工具模态框 -->
+  <div id="secretOtpModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>🔢 密钥验证码</h2>
+        <button class="close-btn" onclick="hideSecretOtpModal()">&times;</button>
+      </div>
+
+      <div class="tool-section">
+        <div class="section-title">输入密钥</div>
+        <div class="input-area">
+          <textarea
+            id="secretOtpInput"
+            placeholder="请输入 Base32 密钥（示例：JBSWY3DPEHPK3PXP）"
+            rows="4"
+            style="width: 100%; padding: 12px; border: 2px solid var(--border-primary); border-radius: 8px; font-size: 14px; font-family: monospace; resize: vertical; background: var(--input-bg); color: var(--text-primary);"
+            autocomplete="off"
+          ></textarea>
+        </div>
+      </div>
+
+      <div class="tool-section">
+        <div class="section-title">验证码参数</div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <label style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 120px; min-width: 120px;">
+            <span style="font-size: 12px; color: var(--text-secondary);">位数</span>
+            <select id="secretOtpDigits" style="padding: 10px; border: 2px solid var(--border-primary); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+              <option value="6" selected>6 位</option>
+              <option value="8">8 位</option>
+            </select>
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 120px; min-width: 120px;">
+            <span style="font-size: 12px; color: var(--text-secondary);">周期</span>
+            <select id="secretOtpPeriod" style="padding: 10px; border: 2px solid var(--border-primary); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+              <option value="30" selected>30 秒</option>
+              <option value="60">60 秒</option>
+              <option value="120">120 秒</option>
+            </select>
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 160px; min-width: 160px;">
+            <span style="font-size: 12px; color: var(--text-secondary);">算法</span>
+            <select id="secretOtpAlgorithm" style="padding: 10px; border: 2px solid var(--border-primary); border-radius: 8px; background: var(--input-bg); color: var(--text-primary);">
+              <option value="SHA1" selected>SHA1</option>
+              <option value="SHA256">SHA256</option>
+              <option value="SHA512">SHA512</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="tool-section" id="secretOtpResultSection" style="display: none;">
+        <div class="section-title">生成结果</div>
+        <div class="key-result" style="padding: 15px; border-radius: 8px; margin-bottom: 15px; background: var(--bg-secondary);">
+          <div id="secretOtpCodeText" style="font-family: monospace; font-size: 30px; font-weight: 700; letter-spacing: 3px; text-align: center; color: var(--text-primary);"></div>
+          <div id="secretOtpConfig" style="margin-top: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);"></div>
+          <div id="secretOtpRemaining" style="margin-top: 6px; text-align: center; font-size: 12px; color: var(--text-secondary);"></div>
+          <div style="margin-top: 14px; display: flex; justify-content: center;">
+            <button class="btn btn-info" onclick="copySecretOtpCode()" style="padding: 8px 24px; font-size: 13px;">复制验证码</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-primary); display: flex; justify-content: center;">
+        <button id="generateSecretOtpBtn" type="button" class="btn btn-primary" onclick="generateSecretOtpCode()" style="padding: 12px 20px; border-radius: 8px; font-size: 14px;">🔢 生成验证码</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 二维码模态框 -->
   <div id="qrModal" class="modal" style="display: none;">
     <div class="modal-content">

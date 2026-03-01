@@ -257,6 +257,7 @@ export function getModuleLoaderCode() {
     window.showTimestampTool = createLazyWrapper('tools', 'showTimestampTool');
     window.showKeyCheckTool = createLazyWrapper('tools', 'showKeyCheckTool');
     window.showKeyGeneratorTool = createLazyWrapper('tools', 'showKeyGeneratorTool');
+    window.showSecretOtpTool = createLazyWrapper('tools', 'showSecretOtpTool');
 
     // 二维码功能懒加载
     window.showSecretQRCode = createLazyWrapper('qrcode', 'showSecretQRCode');
