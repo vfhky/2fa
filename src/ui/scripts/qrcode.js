@@ -21,7 +21,8 @@ export function getQRCodeCode() {
     const DEEP_SCAN_INTERVAL = 4;
     const CENTER_CROP_RATIO = 0.72;
     const UPLOAD_DETECT_MAX_SIDE = 2200;
-    const QR_PIPELINE_VERSION = '2026-03-01-r6';
+    const QR_PIPELINE_VERSION = '2026-03-01-r7';
+    let cameraBarcodeDetector = null;
 
     // 切换连续扫描模式
     function toggleContinuousScan() {
@@ -384,8 +385,16 @@ export function getQRCodeCode() {
         // 创建画布用于分析图像
         if (!scannerCanvas) {
           scannerCanvas = document.createElement('canvas');
-          scannerContext = scannerCanvas.getContext('2d');
+          scannerContext = scannerCanvas.getContext('2d', { willReadFrequently: true });
           console.log('画布创建成功');
+        }
+
+        // 初始化 BarcodeDetector（如果可用）
+        if (!cameraBarcodeDetector) {
+          cameraBarcodeDetector = createBarcodeDetectorInstance();
+          if (cameraBarcodeDetector) {
+            console.log('摄像头扫描: BarcodeDetector 初始化成功');
+          }
         }
 
         // 延迟开始扫描，确保视频稳定
@@ -451,6 +460,7 @@ export function getQRCodeCode() {
       isScanning = false;
       scanFrameCounter = 0;
       lastScanAttemptAt = 0;
+      cameraBarcodeDetectorPending = false;
       if (scanInterval) {
         clearInterval(scanInterval);
         scanInterval = null;
@@ -479,6 +489,7 @@ export function getQRCodeCode() {
     }
 
     // 扫描二维码
+    let cameraBarcodeDetectorPending = false;
     function scanForQRCode() {
       if (!isScanning) return;
 
@@ -506,6 +517,28 @@ export function getQRCodeCode() {
 
             scanFrameCounter++;
             const deepMode = scanFrameCounter % DEEP_SCAN_INTERVAL === 0;
+
+            // 优先使用 BarcodeDetector（异步，更准确）
+            if (cameraBarcodeDetector && !cameraBarcodeDetectorPending) {
+              cameraBarcodeDetectorPending = true;
+              const candidateCanvas = createCanvasFromImageData(imageData);
+              cameraBarcodeDetector.detect(candidateCanvas).then(function(detections) {
+                cameraBarcodeDetectorPending = false;
+                if (!isScanning) return;
+                const value = pickBarcodeDetectorValue(detections);
+                if (value) {
+                  console.log('BarcodeDetector摄像头扫描成功');
+                  processScannedQRCode(value);
+                  return;
+                }
+                // BarcodeDetector 未命中，继续下一帧（jsQR 在下方同步执行作为补充）
+              }).catch(function(err) {
+                cameraBarcodeDetectorPending = false;
+                logBarcodeDetectorWarning('camera_detect', err);
+              });
+            }
+
+            // jsQR 同步解码作为补充/后备
             const qrCode = decodeQRCode(imageData, { deep: deepMode });
 
             if (qrCode) {
@@ -786,6 +819,70 @@ export function getQRCodeCode() {
         }
       }
 
+      // 局部自适应阈值（块阈值），用于不均匀光照
+      if (mode === 'binaryLocal') {
+        const blockSize = 31;
+        const halfBlock = Math.floor(blockSize / 2);
+        const cOffset = 8;
+
+        // 计算积分图
+        const lumaArr = new Float32Array(width * height);
+        for (let i = 0; i < lumaArr.length; i++) {
+          const si = i * 4;
+          lumaArr[i] = source[si] * 0.299 + source[si + 1] * 0.587 + source[si + 2] * 0.114;
+        }
+        const integral = new Float64Array(width * height);
+        for (let y = 0; y < height; y++) {
+          let rowSum = 0;
+          for (let x = 0; x < width; x++) {
+            rowSum += lumaArr[y * width + x];
+            integral[y * width + x] = rowSum + (y > 0 ? integral[(y - 1) * width + x] : 0);
+          }
+        }
+
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const x1 = Math.max(0, x - halfBlock);
+            const y1 = Math.max(0, y - halfBlock);
+            const x2 = Math.min(width - 1, x + halfBlock);
+            const y2 = Math.min(height - 1, y + halfBlock);
+            const count = (x2 - x1 + 1) * (y2 - y1 + 1);
+            let sum = integral[y2 * width + x2];
+            if (x1 > 0) sum -= integral[y2 * width + (x1 - 1)];
+            if (y1 > 0) sum -= integral[(y1 - 1) * width + x2];
+            if (x1 > 0 && y1 > 0) sum += integral[(y1 - 1) * width + (x1 - 1)];
+            const localMean = sum / count;
+            const value = lumaArr[y * width + x] > (localMean - cOffset) ? 255 : 0;
+            const di = (y * width + x) * 4;
+            output[di] = value;
+            output[di + 1] = value;
+            output[di + 2] = value;
+            output[di + 3] = 255;
+          }
+        }
+        return buildImageData(output, width, height);
+      }
+
+      // 锐化（3x3 反锐化掩模）
+      if (mode === 'sharpen') {
+        // 核: [0, -1, 0, -1, 5, -1, 0, -1, 0]
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const di = (y * width + x) * 4;
+            for (let c = 0; c < 3; c++) {
+              const center = source[di + c] * 5;
+              const top = y > 0 ? source[((y - 1) * width + x) * 4 + c] : source[di + c];
+              const bottom = y < height - 1 ? source[((y + 1) * width + x) * 4 + c] : source[di + c];
+              const left = x > 0 ? source[(y * width + (x - 1)) * 4 + c] : source[di + c];
+              const right = x < width - 1 ? source[(y * width + (x + 1)) * 4 + c] : source[di + c];
+              output[di + c] = Math.max(0, Math.min(255, Math.round(center - top - bottom - left - right)));
+            }
+            output[di + 3] = 255;
+          }
+        }
+        return buildImageData(output, width, height);
+      }
+
       for (let i = 0; i < source.length; i += 4) {
         const luma = source[i] * 0.299 + source[i + 1] * 0.587 + source[i + 2] * 0.114;
         let value = luma;
@@ -874,6 +971,16 @@ export function getQRCodeCode() {
 
       const candidates = [imageData];
       if (aggressiveMode) {
+        // 增强图像候选：锐化、对比度、局部自适应二值化
+        const sharpenedImg = enhanceImageData(imageData, 'sharpen');
+        candidates.push(sharpenedImg);
+
+        const contrastImg = enhanceImageData(imageData, 'contrastStrong');
+        candidates.push(contrastImg);
+
+        const binaryLocalImg = enhanceImageData(imageData, 'binaryLocal');
+        candidates.push(binaryLocalImg);
+
         const upscaled = upscaleImageData(imageData, 2, 2400);
         if (upscaled !== imageData) {
           candidates.push(upscaled);
@@ -881,7 +988,7 @@ export function getQRCodeCode() {
 
         const candidateBase = upscaled !== imageData ? upscaled : imageData;
         const regionCandidates = getAggressiveRegionCandidates(candidateBase);
-        for (let i = 0; i < regionCandidates.length && candidates.length < 18; i++) {
+        for (let i = 0; i < regionCandidates.length && candidates.length < 22; i++) {
           const candidate = regionCandidates[i];
           if (candidate !== candidateBase) {
             candidates.push(candidate);
@@ -889,7 +996,7 @@ export function getQRCodeCode() {
         }
       }
 
-      const maxSources = aggressiveMode ? 18 : 3;
+      const maxSources = aggressiveMode ? 22 : 3;
       qrDebugLog(debugEnabled, debugTag, 'BarcodeDetector候选集准备完成', {
         sourceSize: describeImageData(imageData),
         aggressiveMode,
@@ -1104,12 +1211,22 @@ export function getQRCodeCode() {
 
         // 上传图片等 aggressive 场景：先尝试原图增强，避免缩放插值带来的信息损失
         if (options.aggressive) {
+          // 锐化处理（改善模糊图片）
+          const fullSharpen = enhanceImageData(imageData, 'sharpen');
+          result = runJsQRAttempts(fullSharpen, deepOptions, debugTag, 'deep/aggressive-full-sharpen');
+          if (result) return result;
+
           const fullContrast = enhanceImageData(imageData, 'contrast');
           result = runJsQRAttempts(fullContrast, deepOptions, debugTag, 'deep/aggressive-full-contrast');
           if (result) return result;
 
           const fullBinaryAdaptive = enhanceImageData(imageData, 'binaryAdaptive');
           result = runJsQRAttempts(fullBinaryAdaptive, deepOptions, debugTag, 'deep/aggressive-full-binaryAdaptive');
+          if (result) return result;
+
+          // 局部自适应阈值（处理不均匀光照）
+          const fullBinaryLocal = enhanceImageData(imageData, 'binaryLocal');
+          result = runJsQRAttempts(fullBinaryLocal, deepOptions, debugTag, 'deep/aggressive-full-binaryLocal');
           if (result) return result;
         }
 
@@ -1120,6 +1237,11 @@ export function getQRCodeCode() {
 
         const binaryImageData = enhanceImageData(optimizedImageData, 'binary');
         result = runJsQRAttempts(binaryImageData, deepOptions, debugTag, 'deep/binary');
+        if (result) return result;
+
+        // 局部自适应阈值（不均匀光照场景）
+        const binaryLocalImageData = enhanceImageData(optimizedImageData, 'binaryLocal');
+        result = runJsQRAttempts(binaryLocalImageData, deepOptions, debugTag, 'deep/binaryLocal');
         if (result) return result;
 
         const optimizedCenterImageData = extractCenterImageData(optimizedImageData, CENTER_CROP_RATIO);
@@ -1336,10 +1458,20 @@ export function getQRCodeCode() {
                 throw new Error('无法创建图片绘图上下文');
               }
 
-              canvas.width = img.width;
-              canvas.height = img.height;
+              // 限制最大尺寸以提高性能和准确率
+              let width = img.width;
+              let height = img.height;
+              const maxSize = UPLOAD_DETECT_MAX_SIDE;
+              if (width > maxSize || height > maxSize) {
+                const ratio = Math.min(maxSize / width, maxSize / height);
+                width = Math.max(1, Math.floor(width * ratio));
+                height = Math.max(1, Math.floor(height * ratio));
+              }
+
+              canvas.width = width;
+              canvas.height = height;
               ctx.imageSmoothingEnabled = false;
-              ctx.drawImage(img, 0, 0);
+              ctx.drawImage(img, 0, 0, width, height);
 
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
               const qrCode = await decodeUploadedQRCodeWithBitmapFallback(file, imageData, {

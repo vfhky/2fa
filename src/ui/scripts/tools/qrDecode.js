@@ -17,6 +17,8 @@ export function getQRDecodeToolCode() {
     const decodeToolWarningCache = new Set();
     let decodeCanvas = null;
     let decodeContext = null;
+    let decodeBarcodeDetector = null;
+    let decodeBarcodeDetectorPending = false;
     const DECODE_MIN_INTERVAL_MS = 80;
     const DEEP_DECODE_INTERVAL = 4;
 
@@ -194,7 +196,12 @@ export function getQRDecodeToolCode() {
         lastDecodeAttemptAt = 0;
         if (!decodeCanvas) {
           decodeCanvas = document.createElement('canvas');
-          decodeContext = decodeCanvas.getContext('2d');
+          decodeContext = decodeCanvas.getContext('2d', { willReadFrequently: true });
+        }
+
+        // 初始化 BarcodeDetector（如果可用）
+        if (!decodeBarcodeDetector && typeof createBarcodeDetectorInstance === 'function') {
+          decodeBarcodeDetector = createBarcodeDetectorInstance();
         }
 
         // 开始扫描
@@ -227,6 +234,7 @@ export function getQRDecodeToolCode() {
       isDecodeScanning = false;
       decodeFrameCounter = 0;
       lastDecodeAttemptAt = 0;
+      decodeBarcodeDetectorPending = false;
       if (decodeInterval) {
         clearInterval(decodeInterval);
         decodeInterval = null;
@@ -308,6 +316,26 @@ export function getQRDecodeToolCode() {
             const imageData = decodeContext.getImageData(0, 0, videoWidth, videoHeight);
             decodeFrameCounter++;
             const deepMode = decodeFrameCounter % DEEP_DECODE_INTERVAL === 0;
+
+            // 优先使用 BarcodeDetector（异步，更准确）
+            if (decodeBarcodeDetector && !decodeBarcodeDetectorPending && typeof createCanvasFromImageData === 'function' && typeof pickBarcodeDetectorValue === 'function') {
+              decodeBarcodeDetectorPending = true;
+              const candidateCanvas = createCanvasFromImageData(imageData);
+              decodeBarcodeDetector.detect(candidateCanvas).then(function(detections) {
+                decodeBarcodeDetectorPending = false;
+                if (!isDecodeScanning) return;
+                const value = pickBarcodeDetectorValue(detections);
+                if (value) {
+                  console.log('工具BarcodeDetector扫描成功');
+                  processDecodeResult(value);
+                  return;
+                }
+              }).catch(function(err) {
+                decodeBarcodeDetectorPending = false;
+              });
+            }
+
+            // jsQR 同步解码
             const qrCode = decodeQRCodeForTool(imageData, deepMode, false);
 
             if (qrCode) {
