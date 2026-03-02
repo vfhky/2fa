@@ -1185,9 +1185,6 @@ export function getCoreCode() {
                 '">' +
                 escapeHTML(accountText) +
                 '</div>' +
-                '<div class="batch-delete-item-id">' +
-                escapeHTML(secret.id) +
-                '</div>' +
                 '</div>' +
                 '</div>'
               );
