@@ -87,7 +87,7 @@ function formatDurationMinutes(minutes) {
 	return `${minutes}分钟`;
 }
 
-function getAuthSessionPolicy(env = {}) {
+export function getAuthSessionPolicy(env = {}) {
 	const sessionTtlMinutes = resolveDurationMinutes(
 		env,
 		'AUTH_SESSION_TTL_MINUTES',

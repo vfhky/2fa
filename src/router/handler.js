@@ -40,6 +40,7 @@ import {
 	handleLogout,
 	checkIfSetupRequired,
 	handleFirstTimeSetup,
+	getAuthSessionPolicy,
 } from '../utils/auth.js';
 import { createPreflightResponse } from '../utils/security.js';
 import { getLogger } from '../utils/logger.js';
@@ -106,7 +107,10 @@ export async function handleRequest(request, env) {
 
 		// 静态路由处理
 		if (pathname === '/' || pathname === '') {
-			return await createMainPage(request);
+			const sessionPolicy = getAuthSessionPolicy(env);
+			return await createMainPage(request, {
+				authIdleTimeoutMinutes: sessionPolicy.idleTimeoutMinutes,
+			});
 		}
 
 		// PWA Manifest

@@ -8,6 +8,14 @@ import { getStyles } from './styles/index.js';
 import { getScripts, getCoreScripts } from './scripts/index.js';
 import { createHtmlResponse } from '../utils/response.js';
 
+function normalizeAuthIdleTimeoutMinutes(value) {
+	const parsed = Number.parseInt(String(value ?? ''), 10);
+	if (!Number.isFinite(parsed) || parsed < 0) {
+		return 5;
+	}
+	return parsed;
+}
+
 /**
  * 创建主页面（密钥管理界面）
  * @param {Request|Object} requestOrOptions - HTTP请求对象或配置选项
@@ -24,9 +32,12 @@ export async function createMainPage(requestOrOptions = {}, maybeOptions = {}) {
 	const request = isRequest ? requestOrOptions : null;
 	const options = isRequest ? maybeOptions : requestOrOptions;
 	const { lazyLoad = true } = options;
+	const authIdleTimeoutMinutes = normalizeAuthIdleTimeoutMinutes(options.authIdleTimeoutMinutes);
 
 	// 构建完整的HTML内容
-	const html = buildCompleteHTML(lazyLoad);
+	const html = buildCompleteHTML(lazyLoad, {
+		authIdleTimeoutMinutes,
+	});
 
 	return createHtmlResponse(html, 200, request, {
 		'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -39,8 +50,8 @@ export async function createMainPage(requestOrOptions = {}, maybeOptions = {}) {
  * 构建完整的HTML内容
  * @param {boolean} lazyLoad - 是否启用懒加载
  */
-function buildCompleteHTML(lazyLoad = true) {
-	return getHTMLStart() + getStyles() + getHTMLBody() + getHTMLScripts(lazyLoad) + getHTMLEnd();
+function buildCompleteHTML(lazyLoad = true, clientConfig = {}) {
+	return getHTMLStart() + getStyles() + getHTMLBody() + getHTMLScripts(lazyLoad, clientConfig) + getHTMLEnd();
 }
 
 /**
@@ -1403,8 +1414,8 @@ function getHTMLBody() {
  * JavaScript脚本部分 - 引用外部脚本文件
  * @param {boolean} lazyLoad - 是否启用懒加载模式
  */
-function getHTMLScripts(lazyLoad = true) {
-	const scriptContent = getInlineScripts(lazyLoad);
+function getHTMLScripts(lazyLoad = true, clientConfig = {}) {
+	const scriptContent = getInlineScripts(lazyLoad, clientConfig);
 	// 🔄 使用 CDN 作为主要来源（Service Worker 会自动缓存）
 	// jsQR 用于二维码扫描，qrcode-generator 用于二维码生成
 	return (
@@ -1426,12 +1437,17 @@ function getHTMLEnd() {
  * 获取内联JavaScript代码
  * @param {boolean} lazyLoad - 是否启用懒加载（true=核心模块，false=完整模块）
  */
-function getInlineScripts(lazyLoad = true) {
+function getInlineScripts(lazyLoad = true, clientConfig = {}) {
+	const bootstrapConfig = {
+		authIdleTimeoutMinutes: normalizeAuthIdleTimeoutMinutes(clientConfig.authIdleTimeoutMinutes),
+	};
+	const bootstrapCode = 'window.__APP_CONFIG__ = Object.freeze(' + JSON.stringify(bootstrapConfig) + ');';
+
 	if (lazyLoad) {
 		console.log('📦 代码分割模式：仅加载核心模块');
-		return getCoreScripts();
+		return bootstrapCode + '\n' + getCoreScripts();
 	} else {
 		console.log('📦 传统模式：加载完整模块');
-		return getScripts();
+		return bootstrapCode + '\n' + getScripts();
 	}
 }

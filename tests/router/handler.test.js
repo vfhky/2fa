@@ -60,7 +60,10 @@ vi.mock('../../src/utils/auth.js', () => ({
   handleRefreshToken: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true, token: 'new-token' }), { status: 200 })),
   handleLogout: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
   checkIfSetupRequired: vi.fn(async (env) => false),
-  handleFirstTimeSetup: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 }))
+  handleFirstTimeSetup: vi.fn(async (request, env) => new Response(JSON.stringify({ success: true }), { status: 200 })),
+  getAuthSessionPolicy: vi.fn(() => ({
+    idleTimeoutMinutes: 5
+  }))
 }));
 
 // Mock response utilities

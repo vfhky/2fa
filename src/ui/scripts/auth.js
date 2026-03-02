@@ -11,6 +11,254 @@ export function getAuthCode() {
 	return `    // ========== 认证相关函数 ==========
     // 注意：现在使用 HttpOnly Cookie 存储 token，不再使用 localStorage
     let isHandlingUnauthorized = false;
+    let hasAuthenticatedSession = false;
+    let isClientSessionLocked = false;
+    let clientIdleMonitorInitialized = false;
+    let clientIdleTimer = null;
+    let clientIdleLastActivityAt = 0;
+    let clientIdleLastEventAt = 0;
+    const CLIENT_IDLE_EVENT_THROTTLE_MS = 1000;
+    const CLIENT_IDLE_TIMEOUT_MINUTES = resolveClientIdleTimeoutMinutes();
+    const CLIENT_IDLE_TIMEOUT_MS = CLIENT_IDLE_TIMEOUT_MINUTES * 60 * 1000;
+
+    function resolveClientIdleTimeoutMinutes() {
+      const configValue = window.__APP_CONFIG__ && window.__APP_CONFIG__.authIdleTimeoutMinutes;
+      const parsed = Number.parseInt(String(configValue ?? ''), 10);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return 5;
+      }
+      return parsed;
+    }
+
+    function isClientIdleLockEnabled() {
+      return CLIENT_IDLE_TIMEOUT_MS > 0;
+    }
+
+    function clearAllOtpIntervals() {
+      if (typeof otpIntervals !== 'object' || !otpIntervals) {
+        return;
+      }
+      Object.keys(otpIntervals).forEach((secretId) => {
+        if (otpIntervals[secretId]) {
+          clearInterval(otpIntervals[secretId]);
+          delete otpIntervals[secretId];
+        }
+      });
+    }
+
+    function closeAllOpenModalsForSecurity() {
+      const modals = Array.from(document.querySelectorAll('.modal'));
+      modals.forEach((modal) => {
+        if (!modal || modal.id === 'loginModal') {
+          return;
+        }
+        const style = window.getComputedStyle(modal);
+        const isVisible = style.display !== 'none' || modal.classList.contains('show');
+        if (!isVisible) {
+          return;
+        }
+        const closeBtn = modal.querySelector('.close-btn');
+        if (closeBtn && typeof closeBtn.click === 'function') {
+          closeBtn.click();
+        } else {
+          modal.classList.remove('show');
+          modal.style.display = 'none';
+        }
+      });
+      if (typeof enableBodyScroll === 'function') {
+        enableBodyScroll();
+      }
+      if (typeof closeActionMenu === 'function') {
+        closeActionMenu();
+      }
+    }
+
+    function clearSensitiveClientData() {
+      clearAllOtpIntervals();
+
+      if (Array.isArray(secrets)) {
+        secrets.length = 0;
+      }
+      if (Array.isArray(filteredSecrets)) {
+        filteredSecrets.length = 0;
+      }
+      if (Array.isArray(secretsGroupedList)) {
+        secretsGroupedList.length = 0;
+      }
+      if (typeof statsCache !== 'undefined') {
+        statsCache = null;
+      }
+
+      const secretsList = document.getElementById('secretsList');
+      if (secretsList) {
+        secretsList.innerHTML = '';
+        secretsList.style.display = 'none';
+      }
+      const loading = document.getElementById('loading');
+      if (loading) {
+        loading.style.display = 'none';
+      }
+      const emptyState = document.getElementById('emptyState');
+      if (emptyState) {
+        emptyState.style.display = 'none';
+      }
+      const pagination = document.getElementById('secretsPagination');
+      if (pagination) {
+        pagination.style.display = 'none';
+      }
+      const mainListToolbar = document.getElementById('mainListToolbar');
+      if (mainListToolbar) {
+        mainListToolbar.style.display = 'none';
+      }
+
+      const searchInput = document.getElementById('searchInput');
+      if (searchInput) {
+        searchInput.value = '';
+      }
+      const searchClear = document.getElementById('searchClear');
+      if (searchClear) {
+        searchClear.style.display = 'none';
+      }
+      currentSearchQuery = '';
+      secretsCurrentPage = 1;
+
+      const otpElements = document.querySelectorAll('[id^="otp-"], [id^="next-otp-"]');
+      otpElements.forEach((el) => {
+        el.textContent = '------';
+      });
+
+      try {
+        localStorage.removeItem('2fa-secrets-cache');
+      } catch (e) {
+        console.warn('清除缓存失败:', e);
+      }
+    }
+
+    function clearClientIdleTimer() {
+      if (clientIdleTimer) {
+        clearTimeout(clientIdleTimer);
+        clientIdleTimer = null;
+      }
+    }
+
+    function scheduleClientIdleLock() {
+      if (!isClientIdleLockEnabled() || !hasAuthenticatedSession || isClientSessionLocked || isHandlingUnauthorized) {
+        clearClientIdleTimer();
+        return;
+      }
+
+      clearClientIdleTimer();
+      const elapsed = Date.now() - clientIdleLastActivityAt;
+      const remaining = CLIENT_IDLE_TIMEOUT_MS - elapsed;
+      if (remaining <= 0) {
+        lockClientSession('长时间未操作，已锁定，请重新登录');
+        return;
+      }
+
+      clientIdleTimer = setTimeout(() => {
+        enforceClientIdlePolicy();
+      }, remaining + 50);
+    }
+
+    function markClientActivity(force = false) {
+      if (!isClientIdleLockEnabled() || !hasAuthenticatedSession || isClientSessionLocked || isHandlingUnauthorized) {
+        return;
+      }
+
+      const now = Date.now();
+      if (!force && now - clientIdleLastEventAt < CLIENT_IDLE_EVENT_THROTTLE_MS) {
+        return;
+      }
+      clientIdleLastEventAt = now;
+      clientIdleLastActivityAt = now;
+      scheduleClientIdleLock();
+    }
+
+    function enforceClientIdlePolicy() {
+      if (!isClientIdleLockEnabled() || !hasAuthenticatedSession || isClientSessionLocked || isHandlingUnauthorized) {
+        return;
+      }
+
+      const elapsed = Date.now() - clientIdleLastActivityAt;
+      if (elapsed >= CLIENT_IDLE_TIMEOUT_MS) {
+        lockClientSession('长时间未操作，已锁定，请重新登录');
+        return;
+      }
+
+      scheduleClientIdleLock();
+    }
+
+    function attachClientIdleActivityListeners() {
+      const activityEvents = ['pointerdown', 'keydown', 'touchstart', 'scroll'];
+      activityEvents.forEach((eventName) => {
+        document.addEventListener(eventName, () => {
+          markClientActivity(false);
+        }, { passive: true });
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          enforceClientIdlePolicy();
+        }
+      });
+
+      window.addEventListener('focus', () => {
+        enforceClientIdlePolicy();
+      });
+    }
+
+    function initClientIdleMonitor() {
+      if (clientIdleMonitorInitialized || !isClientIdleLockEnabled()) {
+        return;
+      }
+      clientIdleMonitorInitialized = true;
+      attachClientIdleActivityListeners();
+    }
+
+    function setClientAuthenticatedSessionState(active) {
+      hasAuthenticatedSession = Boolean(active);
+      if (hasAuthenticatedSession) {
+        isClientSessionLocked = false;
+        clientIdleLastActivityAt = Date.now();
+        clientIdleLastEventAt = clientIdleLastActivityAt;
+        scheduleClientIdleLock();
+      } else {
+        clearClientIdleTimer();
+      }
+    }
+
+    function lockClientSession(reason = '登录已失效，请重新登录', options = {}) {
+      const {
+        toastIcon = '⚠️',
+        showToast = true,
+        callLogoutApi = true
+      } = options;
+
+      if (isClientSessionLocked) {
+        return;
+      }
+
+      isClientSessionLocked = true;
+      isHandlingUnauthorized = true;
+      setClientAuthenticatedSessionState(false);
+      closeAllOpenModalsForSecurity();
+      clearSensitiveClientData();
+      clearAuthToken();
+
+      if (callLogoutApi) {
+        fetch('/api/logout', {
+          method: 'POST',
+          credentials: 'include'
+        }).catch(() => {
+          // 忽略网络异常，继续前端锁定流程
+        });
+      }
+
+      if (showToast) {
+        showCenterToast(toastIcon, reason);
+      }
+      showLoginModal();
+    }
 
     // 获取存储的令牌（已弃用 - Cookie 自动管理）
     function getAuthToken() {
@@ -56,6 +304,8 @@ export function getAuthCode() {
           const data = await response.json();
           if (data.success) {
             console.log('✅ Token 刷新成功');
+            setClientAuthenticatedSessionState(true);
+            markClientActivity(true);
             return true;
           }
         }
@@ -145,6 +395,7 @@ export function getAuthCode() {
 
         if (response.ok && data.success) {
           isHandlingUnauthorized = false;
+          setClientAuthenticatedSessionState(true);
           // 登录成功 - token 已通过 HttpOnly Cookie 自动设置
           hideLoginModal();
 
@@ -192,21 +443,11 @@ export function getAuthCode() {
       if (isHandlingUnauthorized) {
         return;
       }
-      isHandlingUnauthorized = true;
-
-      clearAuthToken();
-
-      // 清除缓存的密钥数据（安全考虑）
-      try {
-        localStorage.removeItem('2fa-secrets-cache');
-      } catch (e) {
-        console.warn('清除缓存失败:', e);
-      }
-
-      showCenterToast('⚠️', '登录已过期，请重新登录');
-      setTimeout(() => {
-        showLoginModal();
-      }, 1500);
+      lockClientSession('登录已过期，请重新登录', {
+        toastIcon: '⚠️',
+        showToast: true,
+        callLogoutApi: false
+      });
     }
 
     // 主动退出登录
@@ -221,17 +462,11 @@ export function getAuthCode() {
       }
 
       clearAuthToken();
-
-      try {
-        localStorage.removeItem('2fa-secrets-cache');
-      } catch (e) {
-        console.warn('清除缓存失败:', e);
-      }
-
-      showCenterToast('✅', '已安全退出登录');
-      setTimeout(() => {
-        showLoginModal();
-      }, 500);
+      lockClientSession('已安全退出登录', {
+        toastIcon: '✅',
+        showToast: true,
+        callLogoutApi: false
+      });
     }
 
     // 为 fetch 请求添加认证（使用 Cookie）并支持自动续期
@@ -246,6 +481,9 @@ export function getAuthCode() {
         handleUnauthorized();
         return response;
       }
+
+      setClientAuthenticatedSessionState(true);
+      markClientActivity(true);
       
       // 🔄 自动续期：检查响应头中是否有刷新标记
       if (response.headers.get('X-Token-Refresh-Needed') === 'true') {
@@ -277,6 +515,9 @@ export function getAuthCode() {
       
       return response;
     }
+
+    // 初始化前端空闲锁屏监控（默认启用）
+    initClientIdleMonitor();
 
 `;
 }
