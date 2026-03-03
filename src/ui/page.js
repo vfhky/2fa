@@ -461,6 +461,7 @@ function getHTMLBody() {
             </select>
           </div>
           <div class="backup-actions">
+            <button type="button" class="btn btn-primary" onclick="createManualBackup()" id="manualBackupBtn" style="padding: 8px 16px; font-size: 12px;">💾 立即备份</button>
             <button type="button" class="btn btn-outline" onclick="loadBackupList()" style="padding: 8px 16px; font-size: 12px;">🔄 刷新</button>
             <button type="button" class="btn btn-outline" onclick="exportSelectedBackup()" id="exportBackupBtn" disabled style="padding: 8px 16px; font-size: 12px;">📥 导出备份</button>
             <button type="button" class="btn btn-danger" onclick="deleteSelectedBackup()" id="deleteSelectedBackupBtn" disabled style="padding: 8px 16px; font-size: 12px;">🗑️ 删除当前</button>

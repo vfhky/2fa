@@ -41,6 +41,95 @@ const LogLevelIcons = {
 
 const SENSITIVE_QUERY_PARAMS = new Set(['secret', 'token', 'password', 'credential', 'auth', 'key', 'otp']);
 const SENSITIVE_HEADER_NAMES = new Set(['authorization', 'cookie', 'set-cookie', 'x-api-key']);
+const REDACTED_TEXT = '***REDACTED***';
+const JWT_LIKE_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+function normalizeFieldName(fieldName) {
+	if (!fieldName || typeof fieldName !== 'string') {
+		return '';
+	}
+	return fieldName
+		.replace(/([a-z])([A-Z])/g, '$1_$2')
+		.replace(/[\s-]+/g, '_')
+		.toLowerCase();
+}
+
+function isSensitiveFieldName(fieldName) {
+	const normalized = normalizeFieldName(fieldName);
+	if (!normalized) {
+		return false;
+	}
+
+	if (normalized.endsWith('_count') || normalized.endsWith('_length')) {
+		return false;
+	}
+
+	return /(^|_)(secret|secrets|password|credential|token|authorization|cookie|api_key|encryption_key|private_key|jwt|auth)(_|$)/.test(
+		normalized,
+	);
+}
+
+function sanitizeSensitiveString(value) {
+	if (typeof value !== 'string') {
+		return value;
+	}
+
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return value;
+	}
+
+	if (JWT_LIKE_PATTERN.test(trimmed)) {
+		return REDACTED_TEXT;
+	}
+	if (trimmed.includes('otpauth://')) {
+		return REDACTED_TEXT;
+	}
+
+	return value;
+}
+
+function sanitizeLogValue(value, fieldName = '', depth = 0) {
+	if (depth > 6) {
+		return '[MaxDepthExceeded]';
+	}
+
+	if (isSensitiveFieldName(fieldName)) {
+		return REDACTED_TEXT;
+	}
+
+	if (value === null || value === undefined) {
+		return value;
+	}
+
+	if (typeof value === 'string') {
+		return sanitizeSensitiveString(value);
+	}
+
+	if (Array.isArray(value)) {
+		return value.map((item) => sanitizeLogValue(item, fieldName, depth + 1));
+	}
+
+	if (typeof value === 'object') {
+		if (value instanceof Date) {
+			return value.toISOString();
+		}
+		if (value instanceof Error) {
+			return {
+				name: value.name,
+				message: sanitizeSensitiveString(value.message),
+			};
+		}
+
+		const result = {};
+		for (const [key, nestedValue] of Object.entries(value)) {
+			result[key] = sanitizeLogValue(nestedValue, key, depth + 1);
+		}
+		return result;
+	}
+
+	return value;
+}
 
 function sanitizeHeadersForLog(headers) {
 	const sanitized = {};
@@ -48,7 +137,7 @@ function sanitizeHeadersForLog(headers) {
 	if (headers && headers.forEach) {
 		headers.forEach((value, key) => {
 			const lowerKey = key.toLowerCase();
-			sanitized[key] = SENSITIVE_HEADER_NAMES.has(lowerKey) ? '***REDACTED***' : value;
+			sanitized[key] = SENSITIVE_HEADER_NAMES.has(lowerKey) ? REDACTED_TEXT : value;
 		});
 	}
 
@@ -107,6 +196,8 @@ class Logger {
 		const timestamp = new Date().toISOString();
 		const levelName = LogLevelNames[level];
 		const icon = LogLevelIcons[level];
+		const normalizedData = data && typeof data === 'object' ? data : {};
+		const { request: requestData, ...logData } = normalizedData;
 
 		const logEntry = {
 			timestamp,
@@ -114,31 +205,30 @@ class Logger {
 			service: this.serviceName,
 			version: this.version,
 			environment: this.environment,
-			message,
-			...this.context,
-			...data,
+			message: sanitizeSensitiveString(message),
+			...sanitizeLogValue(this.context),
+			...sanitizeLogValue(logData),
 		};
 
 		// 添加错误信息
 		if (error) {
 			logEntry.error = {
 				name: error.name,
-				message: error.message,
+				message: sanitizeSensitiveString(error.message),
 				stack: error.stack,
-				cause: error.cause,
+				cause: sanitizeLogValue(error.cause, 'cause'),
 			};
 		}
 
 		// 添加请求信息（如果存在）
-		if (data.request) {
-			const req = data.request;
+		if (requestData) {
+			const req = requestData;
 			logEntry.request = {
 				method: req.method,
-				url: req.url,
+				url: sanitizeUrlForLog(req.url),
 				headers: this._sanitizeHeaders(req.headers),
 				cf: req.cf, // Cloudflare 特有信息
 			};
-			delete logEntry.request; // 从顶层移除
 		}
 
 		return { logEntry, icon, levelName };

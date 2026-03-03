@@ -438,21 +438,36 @@ export default {
 
 			const currentHash = await generateDataHash(secrets, env);
 			const lastHash = await env.SECRETS_KV.get('last_backup_hash');
+			const backupList = await env.SECRETS_KV.list({
+				prefix: 'backup_',
+				limit: 1,
+			});
+			const hasBackupFiles = Array.isArray(backupList.keys) && backupList.keys.length > 0;
 
 			logger.info('详细数据变化检测', {
 				currentHashPreview: currentHash.substring(0, 16) + '...',
 				lastHashPreview: lastHash ? lastHash.substring(0, 16) + '...' : 'null',
+				hasBackupFiles,
 				secretCount: secrets.length,
 			});
 
-			// 如果哈希值不存在或不匹配，强制执行备份
-			const dataChanged = !lastHash || currentHash !== lastHash;
+			// 兜底策略：如果没有任何备份文件，也要强制补一份
+			const shouldCreateBackup = !lastHash || currentHash !== lastHash || !hasBackupFiles;
+			let backupReason = '数据未变化';
+			if (!hasBackupFiles) {
+				backupReason = '没有备份文件，触发兜底备份';
+			} else if (!lastHash) {
+				backupReason = '首次备份';
+			} else if (currentHash !== lastHash) {
+				backupReason = '数据已变化';
+			}
+
 			logger.info('数据变化检测结果', {
-				changed: dataChanged,
-				reason: !lastHash ? '首次备份' : dataChanged ? '数据已变化' : '数据未变化',
+				changed: shouldCreateBackup,
+				reason: backupReason,
 			});
 
-			if (!dataChanged) {
+			if (!shouldCreateBackup) {
 				logger.info('数据未变化，跳过备份', {
 					tip: '如果修改了密钥但未触发备份，请检查 saveDataHash 调用',
 				});

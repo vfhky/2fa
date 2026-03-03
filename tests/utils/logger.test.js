@@ -163,6 +163,29 @@ describe('Logger System', () => {
       expect(logEntry.action).toBe('login');
     });
 
+    it('应该自动脱敏敏感字段', () => {
+      const logger = new Logger();
+      const { logEntry } = logger._formatMessage(
+        LogLevel.INFO,
+        'Test sensitive fields',
+        {
+          secret: 'JBSWY3DPEHPK3PXP',
+          password: 'P@ssw0rd!',
+          token: 'abc.def.ghi',
+          nested: {
+            credential: 'my-credential'
+          },
+          safeField: 'normal-value'
+        }
+      );
+
+      expect(logEntry.secret).toBe('***REDACTED***');
+      expect(logEntry.password).toBe('***REDACTED***');
+      expect(logEntry.token).toBe('***REDACTED***');
+      expect(logEntry.nested.credential).toBe('***REDACTED***');
+      expect(logEntry.safeField).toBe('normal-value');
+    });
+
     it('应该包含错误信息', () => {
       const logger = new Logger();
       const error = new Error('Test error');
@@ -873,15 +896,10 @@ describe('Logger System', () => {
       expect(result.message).toBe('');
     });
 
-    it('应该处理 null 数据（测试源代码bug）', () => {
+    it('应该处理 null 数据', () => {
       const logger = new Logger();
-
-      // 注意：源代码在 _formatMessage 中有bug：
-      // if (data.request) 会在data为null时抛TypeError
-      // 这是一个已知的源代码bug
-      expect(() => {
-        logger.info('Test', null);
-      }).toThrow(TypeError);
+      const result = logger.info('Test', null);
+      expect(result.message).toBe('Test');
     });
 
     it('应该处理 undefined 数据', () => {

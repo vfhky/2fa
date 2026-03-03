@@ -61,6 +61,40 @@ export function getBackupCode() {
       });
     }
 
+    async function createManualBackup() {
+      const manualBackupBtn = document.getElementById('manualBackupBtn');
+      const originalText = manualBackupBtn ? manualBackupBtn.textContent : '💾 立即备份';
+
+      if (manualBackupBtn) {
+        manualBackupBtn.textContent = '备份中...';
+        manualBackupBtn.disabled = true;
+      }
+
+      try {
+        const response = await authenticatedFetch('/api/backup', {
+          method: 'POST'
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.success !== true) {
+          throw new Error(result.message || result.error || '手动备份失败');
+        }
+
+        const countText = Number.isFinite(result.count) ? (result.count + ' 个密钥') : '密钥';
+        showCenterToast('✅', '手动备份成功（' + countText + '）');
+
+        await loadBackupList();
+      } catch (error) {
+        console.error('手动备份失败:', error);
+        showCenterToast('❌', '手动备份失败: ' + (error.message || '未知错误'));
+      } finally {
+        if (manualBackupBtn) {
+          manualBackupBtn.textContent = originalText;
+          manualBackupBtn.disabled = false;
+        }
+      }
+    }
+
     async function loadBackupList() {
       const backupSelectElement = document.getElementById('backupSelect');
       backupList = [];

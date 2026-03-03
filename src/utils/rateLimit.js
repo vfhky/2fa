@@ -1,6 +1,20 @@
 import { getSecurityHeaders } from './security.js';
 import { getLogger } from './logger.js';
 
+function createStableFingerprint(value) {
+	if (typeof value !== 'string' || value.length === 0) {
+		return 'unknown';
+	}
+
+	let hash = 2166136261;
+	for (let i = 0; i < value.length; i++) {
+		hash ^= value.charCodeAt(i);
+		hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+	}
+
+	return (hash >>> 0).toString(16);
+}
+
 /**
  * Rate Limiting 工具模块 V2 - 滑动窗口算法
  * 基于 Cloudflare KV 实现的请求频率限制
@@ -467,7 +481,7 @@ export function getClientIdentifier(request, type = 'ip') {
 			const authHeader = request.headers.get('Authorization');
 			if (authHeader && authHeader.startsWith('Bearer ')) {
 				const token = authHeader.substring(7);
-				return `token:${token.substring(0, 16)}`;
+				return `token:${createStableFingerprint(token)}`;
 			}
 			return 'no-token';
 		}
@@ -477,7 +491,7 @@ export function getClientIdentifier(request, type = 'ip') {
 			const auth = request.headers.get('Authorization');
 			if (auth && auth.startsWith('Bearer ')) {
 				const token = auth.substring(7);
-				return `${ip}:${token.substring(0, 16)}`;
+				return `${ip}:token-${createStableFingerprint(token)}`;
 			}
 			return ip;
 		}

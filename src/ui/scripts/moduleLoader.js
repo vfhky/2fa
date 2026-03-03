@@ -239,6 +239,7 @@ export function getModuleLoaderCode() {
     window.hideExportFormatModal = createLazyWrapper('export', 'hideExportFormatModal');
 
     // 备份管理懒加载
+    window.createManualBackup = createLazyWrapper('backup', 'createManualBackup');
     window.loadBackupList = createLazyWrapper('backup', 'loadBackupList');
     window.showRestoreModal = createLazyWrapper('backup', 'showRestoreModal');
     window.hideRestoreModal = createLazyWrapper('backup', 'hideRestoreModal');

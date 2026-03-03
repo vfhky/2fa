@@ -640,6 +640,17 @@ describe('API Secrets Module', () => {
       expect(text).toContain('安全模式（推荐）');
       expect(text).toContain('/api/otp/generate');
     });
+
+    it('无效密钥时不应回显原始密钥', async () => {
+      const invalidSecret = 'INVALID01289';
+      const mockRequest = createMockRequest({}, 'GET', `https://example.com/otp/${invalidSecret}?format=json`);
+      const response = await handleGenerateOTP(invalidSecret, mockRequest);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error).toContain('密钥格式错误');
+      expect(data.message).not.toContain(invalidSecret);
+    });
   });
 
   describe('handleGenerateOTPFromBody', () => {

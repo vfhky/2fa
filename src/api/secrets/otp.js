@@ -68,7 +68,7 @@ export async function handleGenerateOTP(secret, request = null, optionOverrides 
 	if (!validation.valid) {
 		return createErrorResponse(
 			'密钥格式错误',
-			`密钥"${secret}"不是有效的Base32格式。Base32密钥应只包含字母A-Z和数字2-7，且长度至少8位`,
+			'提供的密钥不是有效的 Base32 格式。Base32 密钥应只包含字母 A-Z 和数字 2-7，且长度至少 8 位',
 			400,
 			request,
 		);

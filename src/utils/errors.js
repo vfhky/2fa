@@ -32,14 +32,20 @@ export class AppError extends Error {
 	/**
 	 * 转换为 HTTP 响应格式
 	 */
-	toJSON() {
-		return {
+	toJSON(options = {}) {
+		const includeDetails = options.includeDetails === true;
+		const payload = {
 			error: this.name,
 			message: this.message,
 			statusCode: this.statusCode,
-			details: this.details,
 			timestamp: this.timestamp,
 		};
+
+		if (includeDetails && this.details && Object.keys(this.details).length > 0) {
+			payload.details = this.details;
+		}
+
+		return payload;
 	}
 }
 
@@ -173,6 +179,8 @@ export function isOperationalError(error) {
  * @returns {Response} HTTP响应
  */
 export function errorToResponse(error, _request = null) {
+	const shouldExposeErrorDetails = () => false;
+
 	const buildResponseHeaders = (request) => {
 		if (!request) {
 			return {
@@ -188,10 +196,17 @@ export function errorToResponse(error, _request = null) {
 	};
 
 	if (error instanceof AppError) {
-		return new Response(JSON.stringify(error.toJSON()), {
-			status: error.statusCode,
-			headers: buildResponseHeaders(_request),
-		});
+		return new Response(
+			JSON.stringify(
+				error.toJSON({
+					includeDetails: shouldExposeErrorDetails(),
+				}),
+			),
+			{
+				status: error.statusCode,
+				headers: buildResponseHeaders(_request),
+			},
+		);
 	}
 
 	// 未知错误 - 不暴露内部细节

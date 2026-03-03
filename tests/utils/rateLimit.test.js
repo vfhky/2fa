@@ -514,8 +514,8 @@ describe('Rate Limiting Utils', () => {
       });
 
       const identifier = getClientIdentifier(request, 'token');
-      expect(identifier).toBe('token:abcdef1234567890');
-      expect(identifier).toHaveLength(22); // 'token:' + 16 字符
+      expect(identifier.startsWith('token:')).toBe(true);
+      expect(identifier).not.toContain('abcdef1234567890');
     });
 
     it('没有 token 时应该返回 no-token', () => {
@@ -532,7 +532,8 @@ describe('Rate Limiting Utils', () => {
       });
 
       const identifier = getClientIdentifier(request, 'combined');
-      expect(identifier).toBe('203.0.113.1:abcdef1234567890');
+      expect(identifier.startsWith('203.0.113.1:token-')).toBe(true);
+      expect(identifier).not.toContain('abcdef1234567890');
     });
 
     it('combined 模式没有 token 时应该只返回 IP', () => {
